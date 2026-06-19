@@ -29,7 +29,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://musicfy:musicfy@localhost:5432/musicfy
       APP_ENV: test
       FAL_USE_STUB: "true"
-      FAL_WEBHOOK_SECRET: ci-webhook-secret
+      FAL_WEBHOOK_SECRET: test-webhook-secret
       APPLE_BUNDLE_ID: com.musicfy.app
       APPLE_STOREKIT_VERIFY_SIGNATURE: "false"
 
