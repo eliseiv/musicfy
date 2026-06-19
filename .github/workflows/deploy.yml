@@ -1,0 +1,72 @@
+name: Deploy
+
+# Деплой musicfy на общий Linux-сервер за Traefik.
+# Стратегия: rsync рабочего дерева на сервер (сервер НЕ ходит в приватный repo),
+# затем docker compose up -d --build по SSH.
+# Секреты на сервере (/opt/musicfy/.env) при rsync НЕ перезаписываются (--exclude='.env').
+on:
+  push:
+    branches: [main]
+
+# Защита от параллельных деплоев одной ветки.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Rsync project to server
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.pytest_cache' \
+            --exclude='.ruff_cache' \
+            --exclude='.coverage' \
+            --exclude='.idea' \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/musicfy/"
+
+      - name: Deploy on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'set -e
+             cd /opt/musicfy
+             docker network inspect web >/dev/null 2>&1 || docker network create web
+             docker compose -f docker-compose.prod.yml up -d --build
+             # Health gate: ждём healthy api до ~120с, иначе FAIL (старый образ остаётся для отката).
+             ok=0
+             for i in $(seq 1 24); do
+               status=$(docker inspect --format "{{.State.Health.Status}}" musicfy-api-1 2>/dev/null || echo "missing")
+               if [ "$status" = "healthy" ]; then ok=1; break; fi
+               echo "waiting for musicfy-api-1 health: $status ($i/24)"
+               sleep 5
+             done
+             if [ "$ok" != "1" ]; then
+               echo "api did not become healthy within timeout, aborting (old image kept for rollback)" >&2
+               docker compose -f docker-compose.prod.yml ps
+               exit 1
+             fi
+             # Prune только после подтверждения health.
+             docker image prune -f'
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
