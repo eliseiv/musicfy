@@ -1,0 +1,3302 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Musicfy API",
+    "description": "\nBackend приложения **Musicfy** — единый API над fal.ai для генерации музыки,\nAI-каверов, клонирования голоса и AI-видеоклипов.\n\n---\n\n## Авторизация\n\nВсе защищённые эндпоинты используют **Bearer-токен сессии**.\n\n1. Гость: `POST /v1/auth/guest` → вернёт `token`.\n2. Apple: `POST /v1/auth/apple` (с `identityToken`) → вернёт `token`; гостевые\n   данные автоматически переносятся в постоянный аккаунт.\n3. Передавайте токен в заголовке: `Authorization: Bearer <token>`.\n\nВ Swagger UI нажмите **Authorize** и вставьте токен.\n\n---\n\n## Жизненный цикл генерации (song / cover / video)\n\nГенерация — асинхронная. Ждать на экране не нужно.\n\n1. `POST /v1/songs` (или `/v1/covers`, `/v1/videos`) → **202** с `jobId`.\n2. Опрашивайте `GET /v1/jobs/{jobId}` — поле `status` проходит стадии:\n   `created → queued → running → post_processing → completed | failed | canceled`.\n   Поле `pipeline` показывает прогресс по стадиям.\n3. При `completed`:\n   - song/cover → `trackId` → `GET /v1/tracks/{trackId}` (массив `variants` с `audioUrl`).\n   - video → `GET /v1/videos/{jobId}` (`videoUrl`).\n4. По завершении долгих задач (видео) приходит push-уведомление (APNs).\n\n`lyrics` и клонирование голоса — синхронные (результат сразу в ответе).\n\n---\n\n## Кредиты и подписка\n\nЛимиты раздельны по категориям: **song**, **cover**, **video**.\n\n- Сначала тратится подписочный лимит (entitlements), затем покупные паки.\n- Текущий баланс: `GET /v1/billing/balance`.\n- При исчерпании лимита создание задачи вернёт **402 `INSUFFICIENT_CREDITS`** —\n  это сигнал показать paywall.\n- `lyrics` и `voice clone` кредиты не тратят.\n\n---\n\n## Формат ошибок\n\nВсе 4xx/5xx ответы имеют единый вид:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"Not enough generation credits to perform the operation\",\n    \"details\": { \"category\": \"song\", \"required\": 1 }\n  },\n  \"requestId\": \"b5830b11dc4747d4b6b85217eff10177\"\n}\n```\n\nЧастые коды: `UNAUTHORIZED`, `INVALID_SESSION`, `INVALID_INPUT`,\n`SUBSCRIPTION_REQUIRED`, `INSUFFICIENT_CREDITS`, `CONSENT_REQUIRED`,\n`MODERATION_BLOCKED`, `JOB_NOT_FOUND`, `TRACK_NOT_FOUND`, `UPLOAD_REJECTED`,\n`PROVIDER_FAILED`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`.\n",
+    "contact": {
+      "name": "Musicfy Backend"
+    },
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local"
+    }
+  ],
+  "paths": {
+    "/v1/auth/guest": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Создать guest-сессию",
+        "operationId": "guest_sign_in_v1_auth_guest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/apple": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Sign in with Apple",
+        "operationId": "apple_sign_in_v1_auth_apple_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppleSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Выйти (отозвать сессию)",
+        "operationId": "logout_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Авторизация",
+          "Авторизация"
+        ],
+        "summary": "Текущий пользователь",
+        "operationId": "me_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/presets/genres": {
+      "get": {
+        "tags": [
+          "Пресеты"
+        ],
+        "summary": "Жанры",
+        "operationId": "genres_v1_presets_genres_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetView"
+                  },
+                  "type": "array",
+                  "title": "Response Genres V1 Presets Genres Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/presets/moods": {
+      "get": {
+        "tags": [
+          "Пресеты"
+        ],
+        "summary": "Настроения",
+        "operationId": "moods_v1_presets_moods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetView"
+                  },
+                  "type": "array",
+                  "title": "Response Moods V1 Presets Moods Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/presets/prompts": {
+      "get": {
+        "tags": [
+          "Пресеты"
+        ],
+        "summary": "Промпт-пресеты",
+        "operationId": "prompts_v1_presets_prompts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetView"
+                  },
+                  "type": "array",
+                  "title": "Response Prompts V1 Presets Prompts Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/lyrics": {
+      "post": {
+        "tags": [
+          "Текст песни"
+        ],
+        "summary": "Сгенерировать текст",
+        "operationId": "generate_lyrics_v1_lyrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateLyricsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LyricsDraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/lyrics/{draft_id}": {
+      "get": {
+        "tags": [
+          "Текст песни"
+        ],
+        "summary": "Получить текст",
+        "operationId": "get_lyrics_v1_lyrics__draft_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LyricsDraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Текст песни"
+        ],
+        "summary": "Отредактировать текст",
+        "operationId": "update_lyrics_v1_lyrics__draft_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLyricsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LyricsDraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/songs": {
+      "post": {
+        "tags": [
+          "Песни"
+        ],
+        "summary": "Создать песню",
+        "operationId": "create_song_v1_songs_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSongRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/covers": {
+      "post": {
+        "tags": [
+          "Кавер"
+        ],
+        "summary": "Создать AI cover",
+        "operationId": "create_cover_v1_covers_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCoverRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/uploads/audio": {
+      "post": {
+        "tags": [
+          "Загрузка"
+        ],
+        "summary": "Загрузить аудио (для cover)",
+        "operationId": "upload_audio_v1_uploads_audio_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_audio_v1_uploads_audio_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/uploads/voice": {
+      "post": {
+        "tags": [
+          "Загрузка"
+        ],
+        "summary": "Загрузить образец голоса",
+        "operationId": "upload_voice_v1_uploads_voice_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_voice_v1_uploads_voice_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/uploads/source-video": {
+      "post": {
+        "tags": [
+          "Загрузка"
+        ],
+        "summary": "Загрузить видео (для video)",
+        "operationId": "upload_source_video_v1_uploads_source_video_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_source_video_v1_uploads_source_video_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voices/consent": {
+      "post": {
+        "tags": [
+          "Голоса"
+        ],
+        "summary": "Записать согласие на голос",
+        "operationId": "create_consent_v1_voices_consent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voices": {
+      "get": {
+        "tags": [
+          "Голоса"
+        ],
+        "summary": "Библиотека голосов",
+        "operationId": "list_voices_v1_voices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VoiceProfileResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Voices V1 Voices Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Голоса"
+        ],
+        "summary": "Клонировать голос",
+        "operationId": "create_voice_v1_voices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/videos": {
+      "post": {
+        "tags": [
+          "Видео"
+        ],
+        "summary": "Создать AI music video",
+        "operationId": "create_video_v1_videos_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVideoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/videos/{job_id}": {
+      "get": {
+        "tags": [
+          "Видео"
+        ],
+        "summary": "Результат видео",
+        "operationId": "get_video_v1_videos__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices/push-token": {
+      "post": {
+        "tags": [
+          "Устройства"
+        ],
+        "summary": "Зарегистрировать APNs-токен",
+        "operationId": "register_push_token_v1_devices_push_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Задачи"
+        ],
+        "summary": "Статус задачи",
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tracks/{track_id}": {
+      "get": {
+        "tags": [
+          "Треки"
+        ],
+        "summary": "Получить трек",
+        "operationId": "get_track_v1_tracks__track_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Track Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/library": {
+      "get": {
+        "tags": [
+          "Библиотека"
+        ],
+        "summary": "Медиатека пользователя",
+        "operationId": "library_v1_library_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/balance": {
+      "get": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Баланс генераций",
+        "operationId": "balance_v1_billing_balance_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/products": {
+      "get": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Каталог продуктов",
+        "operationId": "products_v1_billing_products_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductView"
+                  },
+                  "type": "array",
+                  "title": "Response Products V1 Billing Products Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/purchases/verify": {
+      "post": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Проверить покупку",
+        "operationId": "verify_purchase_v1_billing_purchases_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPurchaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/restore": {
+      "post": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Restore purchases",
+        "operationId": "restore_v1_billing_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApplyResultResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Restore V1 Billing Restore Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/ledger": {
+      "get": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Журнал кредитов",
+        "operationId": "ledger_v1_billing_ledger_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LedgerEntryView"
+                  },
+                  "title": "Response Ledger V1 Billing Ledger Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/events": {
+      "post": {
+        "tags": [
+          "Аналитика"
+        ],
+        "summary": "Записать событие воронки",
+        "operationId": "track_event_v1_analytics_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/legal/notices": {
+      "get": {
+        "tags": [
+          "Аналитика"
+        ],
+        "summary": "Правовые уведомления",
+        "description": "Copyright / voice-rights уведомления для UI.",
+        "operationId": "legal_notices_v1_legal_notices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LegalNotice"
+                  },
+                  "type": "array",
+                  "title": "Response Legal Notices V1 Legal Notices Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/users/{user_id}/balance": {
+      "get": {
+        "tags": [
+          "Админ"
+        ],
+        "summary": "Баланс пользователя",
+        "operationId": "admin_balance_v1_admin_users__user_id__balance_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBalanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/users/{user_id}/credits": {
+      "post": {
+        "tags": [
+          "Админ"
+        ],
+        "summary": "Начислить кредиты (пак)",
+        "operationId": "admin_grant_credits_v1_admin_users__user_id__credits_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantCreditsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBalanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/users/{user_id}/subscription": {
+      "post": {
+        "tags": [
+          "Админ"
+        ],
+        "summary": "Выдать подписку",
+        "operationId": "admin_grant_subscription_v1_admin_users__user_id__subscription_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBalanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Админ"
+        ],
+        "summary": "Отозвать подписку",
+        "operationId": "admin_revoke_subscription_v1_admin_users__user_id__subscription_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBalanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/fal": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Webhook завершения fal-задачи",
+        "operationId": "fal_webhook_v1_webhooks_fal_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Fal Webhook V1 Webhooks Fal Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/billing/apple": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "App Store Server Notification V2",
+        "operationId": "apple_billing_webhook_v1_webhooks_billing_apple_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Apple Billing Webhook V1 Webhooks Billing Apple Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Система"
+        ],
+        "summary": "Healthcheck",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminBalanceResponse": {
+        "properties": {
+          "userId": {
+            "type": "string",
+            "title": "Userid"
+          },
+          "balances": {
+            "items": {
+              "$ref": "#/components/schemas/AdminCategoryBalance"
+            },
+            "type": "array",
+            "title": "Balances"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userId",
+          "balances"
+        ],
+        "title": "AdminBalanceResponse"
+      },
+      "AdminCategoryBalance": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "subscriptionRemaining": {
+            "type": "integer",
+            "title": "Subscriptionremaining"
+          },
+          "subscriptionGranted": {
+            "type": "integer",
+            "title": "Subscriptiongranted"
+          },
+          "purchasedAvailable": {
+            "type": "integer",
+            "title": "Purchasedavailable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "subscriptionRemaining",
+          "subscriptionGranted",
+          "purchasedAvailable"
+        ],
+        "title": "AdminCategoryBalance"
+      },
+      "AppleSignInRequest": {
+        "properties": {
+          "identityToken": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Identitytoken",
+            "description": "identityToken из ASAuthorizationAppleIDCredential."
+          },
+          "nonce": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce",
+            "description": "Nonce, переданный в запросе Apple (если был)."
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "identityToken"
+        ],
+        "title": "AppleSignInRequest"
+      },
+      "ApplyResultResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ApplyResultResponse"
+      },
+      "AssetResponse": {
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "title": "Assetid",
+            "description": "ID ассета."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "URL для использования в запросах генерации."
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Тип: audio / video / voice_sample / source_video."
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assetId",
+          "url",
+          "kind"
+        ],
+        "title": "AssetResponse",
+        "description": "Загруженный медиа-ассет."
+      },
+      "BalanceResponse": {
+        "properties": {
+          "balances": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryBalance"
+            },
+            "type": "array",
+            "title": "Balances"
+          }
+        },
+        "type": "object",
+        "required": [
+          "balances"
+        ],
+        "title": "BalanceResponse"
+      },
+      "Body_upload_audio_v1_uploads_audio_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_audio_v1_uploads_audio_post"
+      },
+      "Body_upload_source_video_v1_uploads_source_video_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_source_video_v1_uploads_source_video_post"
+      },
+      "Body_upload_voice_v1_uploads_voice_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_voice_v1_uploads_voice_post"
+      },
+      "CategoryBalance": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "subscriptionRemaining": {
+            "type": "integer",
+            "title": "Subscriptionremaining"
+          },
+          "subscriptionGranted": {
+            "type": "integer",
+            "title": "Subscriptiongranted"
+          },
+          "periodEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodend"
+          },
+          "purchasedAvailable": {
+            "type": "integer",
+            "title": "Purchasedavailable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "subscriptionRemaining",
+          "subscriptionGranted",
+          "periodEnd",
+          "purchasedAvailable"
+        ],
+        "title": "CategoryBalance"
+      },
+      "ConsentRequest": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "own_voice | third_party_authorized"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "description": "Подтверждение согласия (должно быть true)."
+          },
+          "statement": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "accepted"
+        ],
+        "title": "ConsentRequest",
+        "description": "Согласие на использование голоса. `accepted` обязан быть true."
+      },
+      "ConsentResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "accepted"
+        ],
+        "title": "ConsentResponse"
+      },
+      "CreateCoverRequest": {
+        "properties": {
+          "sourceAudioUrl": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Sourceaudiourl",
+            "description": "URL исходного аудио (из /v1/uploads/audio)."
+          },
+          "targetVoice": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetvoice",
+            "description": "Целевой голос (пресет или voiceId профиля)."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Название кавера."
+          },
+          "storeStems": {
+            "type": "boolean",
+            "title": "Storestems",
+            "description": "Сохранять отдельные дорожки.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "sourceAudioUrl"
+        ],
+        "title": "CreateCoverRequest",
+        "description": "AI-кавер: загрузите аудио через `POST /v1/uploads/audio`, передайте его `url`.",
+        "example": {
+          "sourceAudioUrl": "https://fal.media/files/.../input.mp3",
+          "targetVoice": "english_male"
+        }
+      },
+      "CreateSongRequest": {
+        "properties": {
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Описание стиля/идеи трека."
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genre",
+            "description": "Жанр (см. /v1/presets/genres)."
+          },
+          "mood": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mood",
+            "description": "Настроение (см. /v1/presets/moods)."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 8,
+            "title": "Language",
+            "description": "Язык вокала (ISO-код).",
+            "default": "en"
+          },
+          "tempoBpm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 240.0,
+                "minimum": 40.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tempobpm",
+            "description": "Темп, BPM."
+          },
+          "vocalType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vocaltype",
+            "description": "Тип вокала (male/female/...)."
+          },
+          "customLyrics": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customlyrics",
+            "description": "Готовый текст песни (вместо генерации)."
+          },
+          "lyricsPrompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lyricsprompt",
+            "description": "Тема для авто-генерации lyrics через LLM."
+          },
+          "negativeHints": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negativehints",
+            "description": "Чего избегать."
+          },
+          "voiceUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voiceurl",
+            "description": "URL образца голоса для вокала (опционально)."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Название трека."
+          },
+          "desiredDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desireddurationseconds",
+            "description": "Желаемая длительность, сек."
+          },
+          "storeStems": {
+            "type": "boolean",
+            "title": "Storestems",
+            "description": "Сохранять отдельные дорожки (stems).",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "CreateSongRequest",
+        "description": "Параметры генерации песни. Минимум — `prompt` ИЛИ `lyricsPrompt`.",
+        "example": {
+          "genre": "pop",
+          "language": "en",
+          "lyricsPrompt": "a hopeful song about a summer road trip",
+          "mood": "happy",
+          "prompt": "upbeat indie pop, summer road trip, bright synths"
+        }
+      },
+      "CreateVideoRequest": {
+        "properties": {
+          "audioUrl": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Audiourl",
+            "description": "URL аудио (трека)."
+          },
+          "sourceVideoUrl": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Sourcevideourl",
+            "description": "URL исходного видео (из /v1/uploads/source-video)."
+          },
+          "mode": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Mode",
+            "description": "Режим. В V1 — avatar_performance.",
+            "default": "avatar_performance"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audioUrl",
+          "sourceVideoUrl"
+        ],
+        "title": "CreateVideoRequest",
+        "description": "AI music video. `audioUrl` — готовый трек, `sourceVideoUrl` — аватар/исходное видео.",
+        "example": {
+          "audioUrl": "https://fal.media/files/.../song.mp3",
+          "mode": "avatar_performance",
+          "sourceVideoUrl": "https://fal.media/files/.../avatar.mp4"
+        }
+      },
+      "CreateVoiceRequest": {
+        "properties": {
+          "sampleAssetUrl": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Sampleasseturl",
+            "description": "URL образца голоса (из /v1/uploads/voice)."
+          },
+          "consentId": {
+            "type": "string",
+            "title": "Consentid",
+            "description": "ID согласия из /v1/voices/consent."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Имя профиля голоса."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sampleAssetUrl",
+          "consentId"
+        ],
+        "title": "CreateVoiceRequest",
+        "description": "Клонирование голоса. Сначала `POST /v1/voices/consent`, затем загрузка образца."
+      },
+      "GenerateLyricsRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "Тема/идея песни."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 8,
+            "title": "Language",
+            "description": "Язык (ISO-код).",
+            "default": "en"
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genre"
+          },
+          "mood": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mood"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "GenerateLyricsRequest",
+        "description": "Синхронная генерация текста песни. Результат можно править через PATCH."
+      },
+      "GrantCreditsRequest": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "description": "song | cover | video"
+          },
+          "amount": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Amount",
+            "description": "Сколько кредитов начислить."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Причина (для журнала)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "amount"
+        ],
+        "title": "GrantCreditsRequest",
+        "description": "Начислить покупные (non-expiring) кредиты в указанную категорию."
+      },
+      "GrantSubscriptionRequest": {
+        "properties": {
+          "song": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Song",
+            "description": "Лимит генераций песен на период.",
+            "default": 0
+          },
+          "cover": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cover",
+            "description": "Лимит каверов на период.",
+            "default": 0
+          },
+          "video": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Video",
+            "description": "Лимит видео на период.",
+            "default": 0
+          },
+          "periodDays": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Perioddays",
+            "description": "Длительность периода в днях (null = без срока).",
+            "default": 30
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Label",
+            "description": "Метка продукта/гранта.",
+            "default": "admin_grant"
+          }
+        },
+        "type": "object",
+        "title": "GrantSubscriptionRequest",
+        "description": "Активировать подписку и выдать периодные лимиты по категориям."
+      },
+      "GuestSignInRequest": {
+        "properties": {
+          "deviceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deviceid",
+            "description": "Стабильный ID устройства (опционально)."
+          }
+        },
+        "type": "object",
+        "title": "GuestSignInRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "JobAcceptedResponse": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid",
+            "description": "ID задачи для опроса статуса."
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Начальный статус (queued)."
+          },
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "description": "true — задача уже существовала (по Idempotency-Key).",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "JobAcceptedResponse",
+        "description": "Ответ на создание асинхронной задачи. Опрашивайте `GET /v1/jobs/{jobId}`."
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "jobType": {
+            "type": "string",
+            "title": "Jobtype"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "currentStage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentstage"
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorcode"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "trackId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trackid"
+          },
+          "pipeline": {
+            "items": {
+              "$ref": "#/components/schemas/StageView"
+            },
+            "type": "array",
+            "title": "Pipeline"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "jobType",
+          "status",
+          "currentStage",
+          "errorCode",
+          "errorMessage",
+          "pipeline",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "JobStatusResponse"
+      },
+      "LedgerEntryView": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "amount": {
+            "type": "integer",
+            "title": "Amount"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "category",
+          "source",
+          "amount",
+          "reason",
+          "createdAt"
+        ],
+        "title": "LedgerEntryView"
+      },
+      "LegalNotice": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "title",
+          "body"
+        ],
+        "title": "LegalNotice"
+      },
+      "LibraryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "createdAt"
+        ],
+        "title": "LibraryItem"
+      },
+      "LibraryResponse": {
+        "properties": {
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryItem"
+            },
+            "type": "array",
+            "title": "Tracks"
+          },
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryItem"
+            },
+            "type": "array",
+            "title": "Videos"
+          },
+          "voices": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryItem"
+            },
+            "type": "array",
+            "title": "Voices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tracks",
+          "videos",
+          "voices"
+        ],
+        "title": "LibraryResponse"
+      },
+      "LyricsDraftResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genre"
+          },
+          "mood": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mood"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "language",
+          "genre",
+          "mood",
+          "source",
+          "createdAt"
+        ],
+        "title": "LyricsDraftResponse"
+      },
+      "MeResponse": {
+        "properties": {
+          "userId": {
+            "type": "string",
+            "title": "Userid"
+          },
+          "isGuest": {
+            "type": "boolean",
+            "title": "Isguest"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userId",
+          "isGuest",
+          "displayName"
+        ],
+        "title": "MeResponse"
+      },
+      "PresetView": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "promptText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompttext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "title"
+        ],
+        "title": "PresetView"
+      },
+      "ProductView": {
+        "properties": {
+          "productId": {
+            "type": "string",
+            "title": "Productid"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "grants": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Grants"
+          },
+          "periodDays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Perioddays"
+          }
+        },
+        "type": "object",
+        "required": [
+          "productId",
+          "kind",
+          "title",
+          "grants",
+          "periodDays"
+        ],
+        "title": "ProductView"
+      },
+      "PushTokenRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Token",
+            "description": "APNs device token."
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Platform",
+            "default": "ios"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "PushTokenRequest",
+        "description": "Регистрация APNs-токена для push о готовности задач."
+      },
+      "RestoreRequest": {
+        "properties": {
+          "signedTransactions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Signedtransactions",
+            "description": "Список JWS-транзакций для восстановления."
+          }
+        },
+        "type": "object",
+        "title": "RestoreRequest",
+        "description": "Restore purchases: массив подписанных транзакций из StoreKit."
+      },
+      "SessionResponse": {
+        "properties": {
+          "userId": {
+            "type": "string",
+            "title": "Userid"
+          },
+          "isGuest": {
+            "type": "boolean",
+            "title": "Isguest"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "Bearer-токен сессии."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expiresat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userId",
+          "isGuest",
+          "displayName",
+          "token",
+          "expiresAt"
+        ],
+        "title": "SessionResponse",
+        "description": "Сессия. Используйте `token` как `Authorization: Bearer <token>`."
+      },
+      "StageView": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "status"
+        ],
+        "title": "StageView"
+      },
+      "TrackEventRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "properties": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "TrackEventRequest"
+      },
+      "TrackResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "jobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/TrackVariantView"
+            },
+            "type": "array",
+            "title": "Variants"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "jobId",
+          "createdAt",
+          "variants"
+        ],
+        "title": "TrackResponse"
+      },
+      "TrackVariantView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "variantIndex": {
+            "type": "integer",
+            "title": "Variantindex"
+          },
+          "audioUrl": {
+            "type": "string",
+            "title": "Audiourl"
+          },
+          "durationSeconds": {
+            "type": "number",
+            "title": "Durationseconds"
+          },
+          "stems": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stems"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "variantIndex",
+          "audioUrl",
+          "durationSeconds"
+        ],
+        "title": "TrackVariantView"
+      },
+      "UpdateLyricsRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "UpdateLyricsRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerifyPurchaseRequest": {
+        "properties": {
+          "signedTransaction": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Signedtransaction",
+            "description": "JWS signedTransactionInfo из StoreKit 2 (Transaction)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "signedTransaction"
+        ],
+        "title": "VerifyPurchaseRequest",
+        "description": "Верификация покупки StoreKit 2."
+      },
+      "VideoResultResponse": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Статус задачи (см. GET /v1/jobs/{jobId})."
+          },
+          "videoUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Videourl",
+            "description": "URL готового видео (если completed)."
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "VideoResultResponse"
+      },
+      "VoiceProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "providerVoiceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providervoiceid"
+          },
+          "jobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "createdAt"
+        ],
+        "title": "VoiceProfileResponse"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "Админ-ключ (ADMIN_API_KEY)",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Авторизация",
+      "description": "Guest-вход, Sign in with Apple, текущий пользователь."
+    },
+    {
+      "name": "Пресеты",
+      "description": "Каталог жанров, настроений и промпт-пресетов для формы генерации."
+    },
+    {
+      "name": "Текст песни",
+      "description": "Генерация и редактирование lyrics (синхронно)."
+    },
+    {
+      "name": "Песни",
+      "description": "Создание песни (text-to-song / lyrics-to-song)."
+    },
+    {
+      "name": "Кавер",
+      "description": "AI-кавер из загруженного аудио (разделение дорожек + смена голоса)."
+    },
+    {
+      "name": "Голоса",
+      "description": "Согласие на голос, клонирование, библиотека голосов."
+    },
+    {
+      "name": "Видео",
+      "description": "AI music video (lipsync). Самая долгая операция."
+    },
+    {
+      "name": "Загрузка",
+      "description": "Загрузка пользовательского аудио/видео (multipart) → Asset."
+    },
+    {
+      "name": "Задачи",
+      "description": "Унифицированный статус задачи генерации и её стадий."
+    },
+    {
+      "name": "Треки",
+      "description": "Готовые треки и их варианты."
+    },
+    {
+      "name": "Библиотека",
+      "description": "Медиатека пользователя: треки, видео, голоса."
+    },
+    {
+      "name": "Биллинг",
+      "description": "Баланс, каталог продуктов, покупки, restore, журнал кредитов."
+    },
+    {
+      "name": "Устройства",
+      "description": "Регистрация APNs push-токена."
+    },
+    {
+      "name": "Аналитика",
+      "description": "События воронки и правовые уведомления."
+    },
+    {
+      "name": "Админ",
+      "description": "Начисление кредитов и подписки. Доступ по ключу ADMIN_API_KEY."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Серверные коллбэки (fal, App Store). Не для клиента."
+    },
+    {
+      "name": "Система",
+      "description": "Служебные эндпоинты (healthcheck)."
+    }
+  ]
+}

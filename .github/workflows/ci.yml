@@ -1,0 +1,55 @@
+name: CI
+
+# Черновик CI для musicfy. Включается как есть; правьте под ваш реестр/деплой.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: musicfy
+          POSTGRES_PASSWORD: musicfy
+          POSTGRES_DB: musicfy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U musicfy -d musicfy"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://musicfy:musicfy@localhost:5432/musicfy
+      APP_ENV: test
+      FAL_USE_STUB: "true"
+      FAL_WEBHOOK_SECRET: ci-webhook-secret
+      APPLE_BUNDLE_ID: com.musicfy.app
+      APPLE_STOREKIT_VERIFY_SIGNATURE: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check app tests
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest -q
