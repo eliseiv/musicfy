@@ -122,10 +122,23 @@ def test_parse_webhook_failed_keeps_error_message_from_envelope():
     assert event.media_url is None
 
 
-def test_parse_webhook_unknown_status_rejected():
-    """Защита контракта: сырой 'ERROR' (не из whitelist) → WebhookPayloadInvalid."""
+def test_parse_webhook_error_status_maps_to_failed():
+    """Контракт TD-003: сырой 'ERROR' больше НЕ отвергается, а маппится в failed
+    (см. ARCHITECTURE.md → Обработка error-конверта fal queue, п.1). Подробные
+    сценарии error-конверта — в tests/test_fal_webhook_error_envelope.py."""
     provider = _make_provider()
-    raw = json.dumps({"request_id": "req-x", "status": "ERROR"}).encode("utf-8")
+    raw = json.dumps(
+        {"request_id": "req-x", "status": "ERROR", "error": "boom"}
+    ).encode("utf-8")
+    event = provider.parse_webhook_event(headers={}, raw_body=raw)
+    assert event.status == "failed"
+    assert event.error_message == "boom"
+
+
+def test_parse_webhook_truly_unknown_status_rejected():
+    """Статусы вне множества алиасов по-прежнему отвергаются как WebhookPayloadInvalid."""
+    provider = _make_provider()
+    raw = json.dumps({"request_id": "req-x", "status": "WEIRD"}).encode("utf-8")
     with pytest.raises(WebhookPayloadInvalid):
         provider.parse_webhook_event(headers={}, raw_body=raw)
 

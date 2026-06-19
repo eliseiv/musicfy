@@ -83,11 +83,49 @@ app/
 > отсутствие распаковки `payload` приводило к `media_url=None` и ложному `succeeded` стадии (см.
 > [TD-002](./100-known-tech-debt.md#td-002)).
 
-> **Обработка error-конверта (status `ERROR`) — известное ограничение.** При статусе `"ERROR"`
-> `parse_fal_webhook_event` бросает `WebhookPayloadInvalid(reason=unknown_status)` (статус не входит в
-> whitelist), а не маппит job-стадию в `failed`. Терминальный `failed`-статус задачи обеспечивает
-> поллер-fallback (`FalPoller`, `POLL_ENABLED=true`). Подробности и план закрытия — см.
-> [TD-003](./100-known-tech-debt.md#td-003).
+**Обработка error-конверта fal queue (контракт реализован).** fal queue webhook доставляет ошибку в
+конверте с верхнеуровневыми полями `request_id`, `gateway_request_id`, `status`, `payload`, `error`
+(при ошибке генерации) и `payload_error` (при ошибке сериализации результата). Парсер
+`parse_fal_webhook_event` (`domain/providers/fal/parsing.py`) обрабатывает этот конверт по
+следующим правилам (реализовано, см. [TD-003 — closed](./100-known-tech-debt.md#td-003)):
+
+1. **Нормализация статуса.** Сырой `status` приводится к lower-case, затем к нормализованному
+   множеству `{completed, failed, canceled, in_progress}` (новых статусов не вводится) по алиасам:
+   - `"ok"` / `"success"` → `completed`;
+   - `"error"` / `"failed"` → `failed`;
+   - `"canceled"` / `"cancelled"` → `canceled` (оба написания валидны);
+   - `"in_progress"` → `in_progress`.
+
+   Error-статус (`"ERROR"` / `"error"`) **больше не** бросает `WebhookPayloadInvalid(reason=unknown_status)` —
+   он маппится в нормализованный `failed`. Статусы вне множества алиасов по-прежнему отвергаются как
+   `WebhookPayloadInvalid`.
+
+2. **Источник `error_message` для `failed` (fallback-цепочка по приоритету):**
+   - a) первое непустое из верхнеуровневых `error` / `error_message` / `payload_error` (все три
+     рассматриваются на одном шаге, в этом порядке приоритета — совпадает с
+     `_resolve_error_message`, `domain/providers/fal/parsing.py`);
+   - b) если пусто → компактная сериализация `payload.detail` (если присутствует) или `payload`.
+
+   Результат компактный, усекается до **500 символов**; чувствительные данные в сообщение не
+   попадают. Если итог пустой → `error_message` остаётся пустым, а webhook-route делает fallback на
+   сам нормализованный статус (`event.error_message or event.status`, `api/v1/webhooks.py`).
+
+3. **Edge — ошибка сериализации (`OK` + пустой `payload` + `payload_error`).** Конверт вида
+   `{"status":"OK","payload":null,"payload_error":"..."}` трактуется как `failed` (исключение из
+   success-пути), `error_message` берётся из `payload_error`.
+
+4. **Success-путь без изменений.** `status:"OK"` с непустым dict `payload` → `completed`, распаковка
+   `payload`, `extract_media` (см. выше). Этот путь не затрагивается.
+
+5. **Pipeline-контракт не меняется.** Нормализованный `failed` через webhook-route
+   (`api/v1/webhooks.py`) маппится в `runner.fail(error_code="PROVIDER_FAILED", error_message=...)` →
+   `_mark_failed` / refund. Маршрут уже корректен — изменение касается только нормализации в парсере.
+
+6. **Подпись и идемпотентность не меняются.** `verify_webhook` и дедупликация по
+   `event_id` / `payload_digest` остаются как есть.
+
+С реализацией этого контракта поллер-fallback (`FalPoller`) перестал быть единственным путём
+терминализации error-задачи: webhook сразу падает с явной причиной из конверта fal.
 
 ## Кредиты и лимиты
 
