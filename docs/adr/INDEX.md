@@ -8,3 +8,4 @@
 | [ADR-001](./ADR-001-fail-fast-db-password.md) | Fail-fast пароль БД в prod (без дефолта) | Accepted | 2026-06-19 |
 | [ADR-002](./ADR-002-rsync-deploy.md) | Rsync-деплой на сервер вместо git-pull | Accepted | 2026-06-19 |
 | [ADR-003](./ADR-003-health-gate-before-prune.md) | Health gate перед `docker image prune` | Accepted | 2026-06-19 |
+| [ADR-004](./ADR-004-ci-gating-before-deploy.md) | CI gating перед деплоем (дополняет ADR-002) | Accepted | 2026-06-19 |
