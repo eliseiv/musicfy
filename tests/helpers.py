@@ -21,15 +21,19 @@ async def emit_fal_completed(
     client, request_id: str, *, media_url: str | None = None,
     duration: float | None = None, stems: dict | None = None,
 ):
+    # Реальный fal queue webhook — конверт {request_id,status,payload,error},
+    # где payload = результат модели ({"audio": {"url": .., "duration": ..}}).
+    # duration модель не возвращает отдельно — кладём внутрь audio-объекта.
     result: dict = {}
     if media_url is not None:
-        result["media_url"] = media_url
-    if duration is not None:
-        result["duration_seconds"] = duration
+        audio: dict = {"url": media_url}
+        if duration is not None:
+            audio["duration"] = duration
+        result["audio"] = audio
     if stems is not None:
         result["stems"] = stems
     body = json.dumps(
-        {"request_id": request_id, "status": "completed", "result": result}
+        {"request_id": request_id, "status": "OK", "payload": result, "error": None}
     ).encode("utf-8")
     sig = compute_signature(WEBHOOK_SECRET, body)
     return await client.post(

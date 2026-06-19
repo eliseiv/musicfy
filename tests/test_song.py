@@ -25,11 +25,14 @@ async def _provider_request_id(app, job_id: str) -> str:
 
 
 async def _emit_fal_completed(client, request_id: str, *, media_url: str, duration: float):
+    # Реальный fal queue webhook: конверт {request_id,status,payload,error},
+    # payload = результат модели {"audio": {"url": .., "duration": ..}}.
     body = json.dumps(
         {
             "request_id": request_id,
-            "status": "completed",
-            "result": {"media_url": media_url, "duration_seconds": duration},
+            "status": "OK",
+            "payload": {"audio": {"url": media_url, "duration": duration}},
+            "error": None,
         }
     ).encode("utf-8")
     sig = compute_signature(WEBHOOK_SECRET, body)

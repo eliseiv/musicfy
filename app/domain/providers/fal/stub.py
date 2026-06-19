@@ -3,20 +3,20 @@
 Активируется флагом `FAL_USE_STUB=true`. Возвращает синтетические ответы и
 подписывает webhook'и тем же `FAL_WEBHOOK_SECRET`.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from collections.abc import Mapping
 
-from app.api.errors import WebhookPayloadInvalid
 from app.domain.providers.fal.base import (
     FalStatusResult,
     FalSubmitResult,
     FalWebhookEvent,
 )
-from app.domain.providers.fal.signature import body_digest, verify_signature
+from app.domain.providers.fal.parsing import parse_fal_webhook_event
+from app.domain.providers.fal.signature import verify_signature
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,7 @@ class StubFalProvider:
     ) -> FalSubmitResult:
         return self._submit("ace-step")
 
-    async def generate_lyrics(
-        self, *, prompt, language="en", genre=None, mood=None
-    ) -> str:
+    async def generate_lyrics(self, *, prompt, language="en", genre=None, mood=None) -> str:
         return (
             f"[Verse]\nStub lyrics for theme: {prompt[:40]}\nLine two of the verse\n\n"
             "[Chorus]\nThis is the stub chorus line\nSinging out into the night"
@@ -98,9 +96,7 @@ class StubFalProvider:
     ) -> FalSubmitResult:
         return self._submit("lipsync")
 
-    async def upload_to_storage(
-        self, *, content: bytes, filename: str, content_type: str
-    ) -> str:
+    async def upload_to_storage(self, *, content: bytes, filename: str, content_type: str) -> str:
         return f"https://fal-stub-cdn.local/{uuid.uuid4().hex}/{filename}"
 
     async def fetch_status(
@@ -109,38 +105,12 @@ class StubFalProvider:
         # Stub всегда IN_QUEUE — в тестах продвигаем пайплайн через emit_webhook.
         return FalStatusResult(request_id=request_id, status="IN_QUEUE", raw={"stub": True})
 
-    async def verify_webhook(
-        self, *, headers: Mapping[str, str], raw_body: bytes
-    ) -> None:
-        verify_signature(
-            secret=self._webhook_secret, raw_body=raw_body, headers=headers
-        )
+    async def verify_webhook(self, *, headers: Mapping[str, str], raw_body: bytes) -> None:
+        verify_signature(secret=self._webhook_secret, raw_body=raw_body, headers=headers)
 
     def parse_webhook_event(
         self, *, headers: Mapping[str, str], raw_body: bytes
     ) -> FalWebhookEvent:
-        try:
-            data = json.loads(raw_body.decode("utf-8"))
-        except Exception as exc:
-            raise WebhookPayloadInvalid(details={"reason": "not_json"}) from exc
-        request_id = data.get("request_id") or data.get("id")
-        if not request_id:
-            raise WebhookPayloadInvalid(details={"reason": "no_request_id"})
-        status_value = (data.get("status") or "completed").lower()
-        result = data.get("result") or {}
-        media_url = (
-            result.get("media_url")
-            or result.get("audio_url")
-            or result.get("video_url")
-        )
-        return FalWebhookEvent(
-            request_id=str(request_id),
-            status=status_value,
-            media_url=media_url,
-            duration_seconds=result.get("duration_seconds"),
-            stems=result.get("stems") if isinstance(result.get("stems"), dict) else None,
-            error_message=data.get("error"),
-            raw=data,
-            event_id=str(data.get("event_id") or f"{request_id}:{status_value}"),
-            payload_digest=body_digest(raw_body),
-        )
+        # Идентично FalAiProvider: единый парсер контракта fal queue webhook,
+        # чтобы стаб и реальный провайдер физически не могли разойтись.
+        return parse_fal_webhook_event(raw_body)
