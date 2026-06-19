@@ -7,6 +7,7 @@
 |---|---|---|---|
 | [TD-001](#td-001) | Нет автоматического отката БД-миграций при rollback | medium | open |
 | [TD-002](#td-002) | Async-стадия без media_url помечается succeeded, опираясь на safety-net в _finalize | low | open |
+| [TD-003](#td-003) | fal error-конверт (status ERROR) отвергается как невалидный payload вместо маппинга job в failed | low | open |
 
 ---
 
@@ -28,16 +29,41 @@
 ## TD-002 — Async-стадия без media_url помечается succeeded, опираясь на safety-net в _finalize {#td-002}
 
 - **Контекст:** при completed-событии async-стадии (`music_generation` / `vocal_tts`) **без** media_url
-  стадия сейчас помечается `'succeeded'`, хотя медиа фактически нет (`_extract_media` не нашёл url в
+  стадия сейчас помечается `'succeeded'`, хотя медиа фактически нет (`extract_media` не нашёл url в
   распакованном результате fal). Несоответствие выявлено в баге парсинга конверта fal queue
   (см. [ARCHITECTURE.md → Контракт интеграции fal.ai](./ARCHITECTURE.md#контракт-интеграции-falai-форматы-результата)).
 - **Последствие:** `_finalize` в `song.py` ловит отсутствие аудио как `PROVIDER_FAILED` (safety-net),
   поэтому задача в итоге корректно падает. Но `job_stage_log` вводит в заблуждение: стадия `succeeded`,
   а песни нет. Это маскирует реальную причину и рискованно для будущих fal-моделей/форматов, не
-  покрытых `_extract_media`.
+  покрытых `extract_media`.
 - **Митигация сейчас:** safety-net в `_finalize` (`song.py`) гарантирует `failed`-статус задачи при
-  отсутствии аудио после пайплайна; парсинг конверта fal (`parse_webhook_event`) исправлен и берёт
-  результат из `payload`.
+  отсутствии аудио после пайплайна; единый парсер конверта fal (`parse_fal_webhook_event`) исправлен и
+  берёт результат из `payload`.
 - **Возможное закрытие:** отдельной итерацией помечать такую стадию `'failed'` + `fail(PROVIDER_FAILED)`
   ближе к источнику события (в обработчике completed-стадии), а не полагаться на safety-net в
   `_finalize`.
+
+---
+
+## TD-003 — fal error-конверт (status ERROR) отвергается как невалидный payload вместо маппинга job в failed {#td-003}
+
+- **Контекст:** реальный fal queue webhook при ошибке генерации приходит в конверте со статусом
+  `"ERROR"` (см. docstring `parsing.py`: `status: "OK"|"ERROR"|...`). Единый парсер
+  `parse_fal_webhook_event` (`app/domain/providers/fal/parsing.py`, строки ~69-74) приводит статус к
+  lower-case и сверяет с whitelist `_WEBHOOK_STATUSES = {"completed","failed","canceled","in_progress"}`
+  и `_OK_STATUSES = {"ok","success"}`. Статус `"error"` не входит ни туда, ни туда, поэтому функция
+  бросает `WebhookPayloadInvalid(details={"reason": "unknown_status", "status": "error"})`, а не маппит
+  job-стадию в `failed`.
+- **Последствие:** error-событие fal не транслируется в немедленный `failed`-статус задачи через
+  webhook-путь. Webhook отвергается как невалидный payload, и явная причина ошибки от fal (`error`
+  верхнего уровня конверта) не используется для маппинга.
+- **Митигация сейчас:** поллер `FalPoller` (`POLL_ENABLED=true`) в итоге подбирает финальный статус
+  очереди fal либо отрабатывает по таймауту, после чего пайплайн доходит до safety-net в `_finalize`
+  (`app/domain/services/pipelines/song.py`, строки ~215-220: `no audio after pipeline` →
+  `_mark_failed(PROVIDER_FAILED)`). Поэтому задача в итоге корректно падает — но позже и без явной
+  причины из error-конверта.
+- **Серьёзность — low:** функциональной потери нет (poller-fallback гарантирует терминальный `failed`),
+  ухудшается лишь скорость и информативность диагностики ошибки.
+- **Возможное закрытие:** добавить `"error"` (и алиасы fal) в маппинг статусов `parse_fal_webhook_event`
+  → нормализованный `failed` с переносом `error`-сообщения конверта в `error_message`, чтобы webhook-путь
+  сразу падал с явной причиной, не дожидаясь поллера.

@@ -55,8 +55,10 @@ app/
 
 ### Контракт интеграции fal.ai (форматы результата)
 
-Два пути доставки результата отдают данные модели в **разной форме** — парсинг в
-`domain/providers/fal/client.py` учитывает оба:
+Два пути доставки результата отдают данные модели в **разной форме** — единый парсер
+`parse_fal_webhook_event` (`domain/providers/fal/parsing.py`) учитывает оба. Провайдеры вызывают его
+через метод-обёртку `parse_webhook_event` (`FalAiProvider` — `client.py`, `StubFalProvider` —
+`stub.py`), который делегирует в этот модульный парсер:
 
 - **Webhook (fal queue, основной путь).** fal queue доставляет результат в **конверте**:
 
@@ -64,10 +66,14 @@ app/
   {"request_id": "...", "gateway_request_id": "...", "status": "OK", "payload": {<результат модели>}, "error": null}
   ```
 
-  Результат модели лежит в `payload`. `parse_webhook_event` извлекает его как
+  Единый парсер `parse_fal_webhook_event` (`domain/providers/fal/parsing.py`) извлекает результат как
   `payload || result || output` (`payload` — первичный источник; `result`/`output` — fallback для
   обратной совместимости со старым форматом). `error_message` берётся с **верхнего уровня** конверта
-  (`error`), а не из распакованного результата.
+  (`error`), а не из распакованного результата. Оба провайдера (`FalAiProvider` и `StubFalProvider`)
+  обязаны вызывать этот модульный парсер; `parse_webhook_event` — лишь метод-обёртка провайдеров над ним.
+  Из распакованного результата функция `extract_media` достаёт `media_url` (`audio.url` / `video.url`,
+  с fallback на `audio_url` / `video_url`) **и** длительность `duration` (`duration` / `duration_seconds`);
+  отдельно извлекаются `stems` (если это dict).
 
 - **Прямой result-эндпоинт (poll-путь `FalPoller` / `fetch_status`, fallback).** Отдаёт
   **распакованный** результат без конверта (например `{"audio": {...}}`). На случай конвертного
@@ -76,6 +82,12 @@ app/
 > Эта разница форматов — контракт интеграции, обязательный к соблюдению при добавлении новых fal-моделей:
 > отсутствие распаковки `payload` приводило к `media_url=None` и ложному `succeeded` стадии (см.
 > [TD-002](./100-known-tech-debt.md#td-002)).
+
+> **Обработка error-конверта (status `ERROR`) — известное ограничение.** При статусе `"ERROR"`
+> `parse_fal_webhook_event` бросает `WebhookPayloadInvalid(reason=unknown_status)` (статус не входит в
+> whitelist), а не маппит job-стадию в `failed`. Терминальный `failed`-статус задачи обеспечивает
+> поллер-fallback (`FalPoller`, `POLL_ENABLED=true`). Подробности и план закрытия — см.
+> [TD-003](./100-known-tech-debt.md#td-003).
 
 ## Кредиты и лимиты
 
