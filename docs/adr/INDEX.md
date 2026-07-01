@@ -9,3 +9,4 @@
 | [ADR-002](./ADR-002-rsync-deploy.md) | Rsync-деплой на сервер вместо git-pull | Accepted | 2026-06-19 |
 | [ADR-003](./ADR-003-health-gate-before-prune.md) | Health gate перед `docker image prune` | Accepted | 2026-06-19 |
 | [ADR-004](./ADR-004-ci-gating-before-deploy.md) | CI gating перед деплоем (дополняет ADR-002) | Accepted | 2026-06-19 |
+| [ADR-005](./ADR-005-coin-wallet-billing.md) | Единый кошелёк монет вместо мультивалютных кредитов | Accepted | 2026-07-01 |

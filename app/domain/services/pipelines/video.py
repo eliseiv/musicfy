@@ -89,7 +89,7 @@ class VideoPipeline(BasePipeline):
     ) -> None:
         await self._mark_status(job_id, JobStatus.post_processing)
         await self._record_stage(job_id, JobStage.upload_cdn, "succeeded")
-        captured = await self._capture_credits(job_id, 1)
+        captured = await self._capture_credits(job_id)
         await self._record_stage(job_id, JobStage.finalize, "running")
         user_id = None
         async with self._sessionmaker() as session:

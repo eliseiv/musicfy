@@ -12,40 +12,45 @@ from app.deps import (
 )
 from app.domain.models.user import User
 from app.domain.repositories.credits import CreditsRepository
+from app.domain.repositories.pricing import PricingRepository
 from app.domain.repositories.products import ProductsRepository
 from app.domain.schemas.billing import (
     ApplyResultResponse,
     BalanceResponse,
-    CategoryBalance,
     LedgerEntryView,
+    PriceView,
+    PricingResponse,
     ProductView,
     RestoreRequest,
     VerifyPurchaseRequest,
 )
 from app.domain.services.billing_service import BillingService
-from app.domain.services.credits import EntitlementService
+from app.domain.services.credits import CoinWalletService
 
 router = APIRouter(prefix="/billing", tags=["Биллинг"])
 
 
-@router.get("/balance", response_model=BalanceResponse, summary="Баланс генераций")
+@router.get("/balance", response_model=BalanceResponse, summary="Баланс монет")
 async def balance(
     current: Annotated[User, Depends(get_current_user)],
-    credits: Annotated[EntitlementService, Depends(get_credits_service)],
+    credits: Annotated[CoinWalletService, Depends(get_credits_service)],
 ) -> BalanceResponse:
-    views = await credits.balances(user_id=current.id)
+    view = await credits.wallet(user_id=current.id)
     return BalanceResponse(
-        balances=[
-            CategoryBalance(
-                category=v.category.value,
-                subscription_remaining=v.subscription_remaining,
-                subscription_granted=v.subscription_granted,
-                period_end=v.period_end,
-                purchased_available=v.purchased_available,
-            )
-            for v in views
-        ]
+        coins_available=view.available,
+        coins_reserved=view.reserved,
     )
+
+
+@router.get("/pricing", response_model=PricingResponse, summary="Прайс-лист генераций")
+async def pricing(sessionmaker: Annotated[object, Depends(get_sessionmaker)]) -> PricingResponse:
+    async with sessionmaker() as session:
+        rows = await PricingRepository(session).list_active()
+        return PricingResponse(
+            prices=[
+                PriceView(job_type=r.job_type, price_coins=r.price_coins) for r in rows
+            ]
+        )
 
 
 @router.get("/products", response_model=list[ProductView], summary="Каталог продуктов")

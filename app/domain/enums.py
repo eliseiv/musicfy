@@ -116,6 +116,8 @@ class BillingProvider(str, Enum):
 
 class ProductKind(str, Enum):
     subscription = "subscription"
+    coin_pack = "coin_pack"
+    # Легаси-значения enum (PG не удаляет значения легко). В новом каталоге не используются.
     song_pack = "song_pack"
     cover_pack = "cover_pack"
     video_pack = "video_pack"
@@ -171,14 +173,9 @@ class WebhookProvider(str, Enum):
     apple = "apple"
 
 
-# Маппинг типа задачи на категорию кредитов. lyrics — без списания (бесплатно в подписке).
-JOB_TYPE_TO_CATEGORY: dict[JobType, CreditCategory | None] = {
-    JobType.song: CreditCategory.song,
-    JobType.lyrics: None,
-    JobType.cover: CreditCategory.cover,
-    JobType.voice_clone: None,
-    JobType.video: CreditCategory.video,
-}
+# Списание генераций теперь определяется прайс-листом `generation_prices` (цена в монетах),
+# а не маппингом тип→категория. Бесплатность `lyrics`/`voice_clone` — отсутствие строки в
+# прайс-листе (цена 0). Прежний JOB_TYPE_TO_CATEGORY удалён (ADR-005 / billing-coins-redesign §8).
 
 # Терминальные статусы задач.
 TERMINAL_JOB_STATUSES = frozenset(

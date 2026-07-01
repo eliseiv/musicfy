@@ -142,7 +142,7 @@ class CoverPipeline(BasePipeline):
             if probed:
                 duration = probed
 
-        captured = await self._capture_credits(job_id, 1)
+        captured = await self._capture_credits(job_id)
         await self._record_stage(job_id, JobStage.finalize, "running")
         async with self._sessionmaker() as session:
             async with session.begin():

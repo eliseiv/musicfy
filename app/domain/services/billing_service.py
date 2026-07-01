@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.enums import (
     BillingProvider,
-    CreditCategory,
     CreditLedgerKind,
     CreditSource,
     ProductKind,
@@ -22,16 +21,10 @@ from app.domain.repositories.products import ProductsRepository, PurchasesReposi
 logger = logging.getLogger(__name__)
 
 SUBSCRIPTION_KINDS = {ProductKind.subscription}
-PACK_KINDS = {
-    ProductKind.song_pack,
-    ProductKind.cover_pack,
-    ProductKind.video_pack,
-    ProductKind.mixed_pack,
-}
 
 
 class BillingService:
-    """Применяет StoreKit-транзакции: гранты подписки и покупные кредиты."""
+    """Применяет StoreKit-транзакции: единый грант монет в кошелёк (паки + подписки)."""
 
     def __init__(
         self,
@@ -84,18 +77,23 @@ class BillingService:
                     raw=tx.get("raw"),
                 )
                 credits = CreditsRepository(session)
-                if product.kind in SUBSCRIPTION_KINDS:
-                    await self._grant_subscription(credits, user_id, product, tx)
-                elif newly and product.kind in PACK_KINDS:
-                    await self._grant_pack(credits, user_id, product, tx["transaction_id"])
+                is_subscription = product.kind in SUBSCRIPTION_KINDS
+                if is_subscription:
+                    await self._update_subscription_state(credits, user_id, product, tx)
+                await self._grant_coins(
+                    credits,
+                    user_id=user_id,
+                    product=product,
+                    transaction_id=tx["transaction_id"],
+                    is_subscription=is_subscription,
+                )
         return {"status": "ok", "deduplicated": not newly}
 
-    async def _grant_subscription(
+    async def _update_subscription_state(
         self, credits: CreditsRepository, user_id: UUID, product: Product, tx: dict
     ) -> None:
-        now = datetime.now(UTC)
+        """Апдейт статуса/срока подписки (idempotent upsert, без начисления монет)."""
         expires_at = _ms_to_dt(tx.get("expires_date_ms"))
-        period_end = expires_at
         await credits.upsert_subscription(
             user_id=user_id,
             values={
@@ -106,42 +104,46 @@ class BillingService:
                 "expires_at": expires_at,
             },
         )
-        for category_str, granted in (product.grants or {}).items():
-            try:
-                category = CreditCategory(category_str)
-            except ValueError:
-                continue
-            await credits.upsert_entitlement(
-                user_id=user_id,
-                category=category,
-                granted=int(granted),
-                period_start=now,
-                period_end=period_end,
-                source_product_external_id=product.external_product_id,
-            )
-            await credits.append_ledger(
-                user_id=user_id, kind=CreditLedgerKind.credit_subscription_grant,
-                amount=int(granted), category=category, source=CreditSource.subscription,
-                reason="subscription_grant", ref_type="product",
-                ref_id=product.external_product_id,
-            )
 
-    async def _grant_pack(
-        self, credits: CreditsRepository, user_id: UUID, product: Product, transaction_id: str
+    async def _grant_coins(
+        self,
+        credits: CreditsRepository,
+        *,
+        user_id: UUID,
+        product: Product,
+        transaction_id: str,
+        is_subscription: bool,
     ) -> None:
-        for category_str, amount in (product.grants or {}).items():
-            try:
-                category = CreditCategory(category_str)
-            except ValueError:
-                continue
-            bal = await credits.ensure_balance(user_id=user_id, category=category)
-            bal.available += int(amount)
-            await credits.append_ledger(
-                user_id=user_id, kind=CreditLedgerKind.credit_purchase,
-                amount=int(amount), category=category, source=CreditSource.purchase,
-                reason="pack_purchase", ref_type="transaction", ref_id=transaction_id,
-                idempotency_key=f"purchase:{transaction_id}:{category.value}",
-            )
+        """Единый монетный грант (пак и подписка), идемпотентный по транзакции.
+
+        Инкремент `coins_available` выполняется ТОЛЬКО при первой ledger-записи
+        (`newly is True`) — иначе повторный verify/notification дал бы двойное начисление.
+        """
+        coins = int((product.grants or {}).get("coins") or 0)
+        if coins <= 0:
+            return
+        kind = (
+            CreditLedgerKind.credit_subscription_grant
+            if is_subscription
+            else CreditLedgerKind.credit_purchase
+        )
+        source = (
+            CreditSource.subscription if is_subscription else CreditSource.purchase
+        )
+        newly = await credits.append_ledger(
+            user_id=user_id,
+            kind=kind,
+            amount=coins,
+            source=source,
+            reason="subscription_grant" if is_subscription else "pack_purchase",
+            ref_type="transaction",
+            ref_id=transaction_id,
+            idempotency_key=f"purchase:{transaction_id}",
+        )
+        if not newly:
+            return
+        wallet = await credits.ensure_wallet(user_id)
+        wallet.coins_available += coins
 
     async def _handle_revocation(self, *, user_id: UUID, tx: dict, note_type: str) -> dict:
         async with self._sessionmaker() as session:

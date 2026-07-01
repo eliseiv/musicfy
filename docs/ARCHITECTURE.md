@@ -129,20 +129,22 @@ app/
 
 ## Кредиты и лимиты
 
-Категорийная модель (решение по ТЗ):
-- `Entitlement(category, granted, used, period)` — подписочные лимиты по категориям song/cover/video,
-  периодные, сгорают. Грантятся при подписочном billing-событии.
-- `CreditBalance(category, available, reserved)` — покупные кредиты (паки), non-expiring.
-- Порядок списания: сначала entitlement категории, затем purchased credits. Reserve → capture → release
-  симметрично, всё пишется в `credit_ledger` (audit).
-- `lyrics` и `voice_clone` не списывают генерационные кредиты (lyrics дешёвый LLM; voice_clone —
-  подготовительный шаг).
+Единый кошелёк монет (решение [ADR-005](./adr/ADR-005-coin-wallet-billing.md); переход с
+мультивалютной модели, полный дизайн — [billing-coins-redesign.md](./billing-coins-redesign.md)):
+- `CoinWallet(user, coins_available, coins_reserved)` — один баланс на пользователя, монеты
+  non-expiring. Заменяет `Entitlement`/`CreditBalance` (per-category — удалены).
+- `GenerationPrice(job_type, price_coins, active)` — прайс-лист: цена генерации в монетах.
+  Стартовые дефолты: `song=10`, `cover=5`, `video=30`. Меняется admin-эндпоинтом без передеплоя.
+- Списание: `reserve(price_of(job_type))` → `capture` (успех) / `release` (refund при провале),
+  атомарно через `SELECT ... FOR UPDATE` на `coin_wallets`, аудит в `credit_ledger` (amount в монетах).
+- `lyrics` и `voice_clone` — бесплатны (нет строки в прайс-листе → цена 0, резерва нет).
 
 ## Биллинг
 
 Прямой StoreKit 2: `providers/billing/apple.py` (верификация подписанных JWS-транзакций через App Store
-Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notifications V2). Подписки →
-гранят entitlements; паки → кредитуют credit_balances. Restore — через `original_transaction_id`.
+Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notifications V2). Продукты —
+пакеты монет (`coin_pack`, `grants={"coins":N}`) и подписки, начисляющие монеты за период; оба
+пополняют единый `coin_wallets`. Restore — через `original_transaction_id`, идемпотентно по transaction.
 
 ## Хранилище ассетов
 

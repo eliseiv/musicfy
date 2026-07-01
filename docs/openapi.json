@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Musicfy API",
-    "description": "\nBackend приложения **Musicfy** — единый API над fal.ai для генерации музыки,\nAI-каверов, клонирования голоса и AI-видеоклипов.\n\n---\n\n## Авторизация\n\nВсе защищённые эндпоинты используют **Bearer-токен сессии**.\n\n1. Гость: `POST /v1/auth/guest` → вернёт `token`.\n2. Apple: `POST /v1/auth/apple` (с `identityToken`) → вернёт `token`; гостевые\n   данные автоматически переносятся в постоянный аккаунт.\n3. Передавайте токен в заголовке: `Authorization: Bearer <token>`.\n\nВ Swagger UI нажмите **Authorize** и вставьте токен.\n\n---\n\n## Жизненный цикл генерации (song / cover / video)\n\nГенерация — асинхронная. Ждать на экране не нужно.\n\n1. `POST /v1/songs` (или `/v1/covers`, `/v1/videos`) → **202** с `jobId`.\n2. Опрашивайте `GET /v1/jobs/{jobId}` — поле `status` проходит стадии:\n   `created → queued → running → post_processing → completed | failed | canceled`.\n   Поле `pipeline` показывает прогресс по стадиям.\n3. При `completed`:\n   - song/cover → `trackId` → `GET /v1/tracks/{trackId}` (массив `variants` с `audioUrl`).\n   - video → `GET /v1/videos/{jobId}` (`videoUrl`).\n4. По завершении долгих задач (видео) приходит push-уведомление (APNs).\n\n`lyrics` и клонирование голоса — синхронные (результат сразу в ответе).\n\n---\n\n## Кредиты и подписка\n\nЛимиты раздельны по категориям: **song**, **cover**, **video**.\n\n- Сначала тратится подписочный лимит (entitlements), затем покупные паки.\n- Текущий баланс: `GET /v1/billing/balance`.\n- При исчерпании лимита создание задачи вернёт **402 `INSUFFICIENT_CREDITS`** —\n  это сигнал показать paywall.\n- `lyrics` и `voice clone` кредиты не тратят.\n\n---\n\n## Формат ошибок\n\nВсе 4xx/5xx ответы имеют единый вид:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"Not enough generation credits to perform the operation\",\n    \"details\": { \"category\": \"song\", \"required\": 1 }\n  },\n  \"requestId\": \"b5830b11dc4747d4b6b85217eff10177\"\n}\n```\n\nЧастые коды: `UNAUTHORIZED`, `INVALID_SESSION`, `INVALID_INPUT`,\n`SUBSCRIPTION_REQUIRED`, `INSUFFICIENT_CREDITS`, `CONSENT_REQUIRED`,\n`MODERATION_BLOCKED`, `JOB_NOT_FOUND`, `TRACK_NOT_FOUND`, `UPLOAD_REJECTED`,\n`PROVIDER_FAILED`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`.\n",
+    "description": "\nBackend приложения **Musicfy** — единый API над fal.ai для генерации музыки,\nAI-каверов, клонирования голоса и AI-видеоклипов.\n\n---\n\n## Авторизация\n\nВсе защищённые эндпоинты используют **Bearer-токен сессии**.\n\n1. Гость: `POST /v1/auth/guest` → вернёт `token`.\n2. Apple: `POST /v1/auth/apple` (с `identityToken`) → вернёт `token`; гостевые\n   данные автоматически переносятся в постоянный аккаунт.\n3. Передавайте токен в заголовке: `Authorization: Bearer <token>`.\n\nВ Swagger UI нажмите **Authorize** и вставьте токен.\n\n---\n\n## Жизненный цикл генерации (song / cover / video)\n\nГенерация — асинхронная. Ждать на экране не нужно.\n\n1. `POST /v1/songs` (или `/v1/covers`, `/v1/videos`) → **202** с `jobId`.\n2. Опрашивайте `GET /v1/jobs/{jobId}` — поле `status` проходит стадии:\n   `created → queued → running → post_processing → completed | failed | canceled`.\n   Поле `pipeline` показывает прогресс по стадиям.\n3. При `completed`:\n   - song/cover → `trackId` → `GET /v1/tracks/{trackId}` (массив `variants` с `audioUrl`).\n   - video → `GET /v1/videos/{jobId}` (`videoUrl`).\n4. По завершении долгих задач (видео) приходит push-уведомление (APNs).\n\n`lyrics` и клонирование голоса — синхронные (результат сразу в ответе).\n\n---\n\n## Монеты и подписка\n\nУ пользователя единый баланс **монет** (coins) — без деления на song/cover/video.\n\n- Каждая генерация стоит фиксированное число монет по прайс-листу\n  `GET /v1/billing/pricing`: **song = 10**, **cover = 5**, **video = 30**.\n  `lyrics` и `voice clone` бесплатны (монеты не тратят).\n- Текущий баланс: `GET /v1/billing/balance` (`coins_available`, `coins_reserved`).\n- Продукты (`GET /v1/billing/products`) — пакеты монет (`coin_pack`) и подписки;\n  оба начисляют монеты на единый баланс. Монеты копятся бессрочно и не сгорают.\n- Списание идёт по схеме **reserve → capture**: при создании задачи цена\n  резервируется, при успехе — списывается, при провале — возвращается\n  (release / refund).\n- При нехватке монет создание задачи вернёт **402 `INSUFFICIENT_CREDITS`** —\n  это сигнал показать paywall.\n- Покупки идемпотентны по `transaction_id` (повторный verify/restore не начислит\n  монеты дважды).\n\n---\n\n## Формат ошибок\n\nВсе 4xx/5xx ответы имеют единый вид:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"Not enough generation credits to perform the operation\",\n    \"details\": { \"required\": 10, \"available\": 3 }\n  },\n  \"requestId\": \"b5830b11dc4747d4b6b85217eff10177\"\n}\n```\n\nЧастые коды: `UNAUTHORIZED`, `INVALID_SESSION`, `INVALID_INPUT`,\n`SUBSCRIPTION_REQUIRED`, `INSUFFICIENT_CREDITS`, `CONSENT_REQUIRED`,\n`MODERATION_BLOCKED`, `JOB_NOT_FOUND`, `TRACK_NOT_FOUND`, `UPLOAD_REJECTED`,\n`PROVIDER_FAILED`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`.\n",
     "contact": {
       "name": "Musicfy Backend"
     },
@@ -1040,7 +1040,7 @@
         "tags": [
           "Биллинг"
         ],
-        "summary": "Баланс генераций",
+        "summary": "Баланс монет",
         "operationId": "balance_v1_billing_balance_get",
         "responses": {
           "200": {
@@ -1059,6 +1059,27 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/v1/billing/pricing": {
+      "get": {
+        "tags": [
+          "Биллинг"
+        ],
+        "summary": "Прайс-лист генераций",
+        "operationId": "pricing_v1_billing_pricing_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/billing/products": {
@@ -1314,7 +1335,7 @@
         "tags": [
           "Админ"
         ],
-        "summary": "Баланс пользователя",
+        "summary": "Баланс монет пользователя",
         "operationId": "admin_balance_v1_admin_users__user_id__balance_get",
         "security": [
           {
@@ -1362,7 +1383,7 @@
         "tags": [
           "Админ"
         ],
-        "summary": "Начислить кредиты (пак)",
+        "summary": "Начислить монеты",
         "operationId": "admin_grant_credits_v1_admin_users__user_id__credits_post",
         "security": [
           {
@@ -1420,7 +1441,7 @@
         "tags": [
           "Админ"
         ],
-        "summary": "Выдать подписку",
+        "summary": "Выдать подписку (начислить монеты)",
         "operationId": "admin_grant_subscription_v1_admin_users__user_id__subscription_post",
         "security": [
           {
@@ -1519,6 +1540,63 @@
         }
       }
     },
+    "/v1/admin/pricing/{job_type}": {
+      "patch": {
+        "tags": [
+          "Админ"
+        ],
+        "summary": "Изменить цену типа генерации",
+        "operationId": "admin_set_price_v1_admin_pricing__job_type__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPriceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPriceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/webhooks/fal": {
       "post": {
         "tags": [
@@ -1599,48 +1677,45 @@
             "type": "string",
             "title": "Userid"
           },
-          "balances": {
-            "items": {
-              "$ref": "#/components/schemas/AdminCategoryBalance"
-            },
-            "type": "array",
-            "title": "Balances"
+          "coinsAvailable": {
+            "type": "integer",
+            "title": "Coinsavailable"
+          },
+          "coinsReserved": {
+            "type": "integer",
+            "title": "Coinsreserved"
           }
         },
         "type": "object",
         "required": [
           "userId",
-          "balances"
+          "coinsAvailable",
+          "coinsReserved"
         ],
         "title": "AdminBalanceResponse"
       },
-      "AdminCategoryBalance": {
+      "AdminPriceResponse": {
         "properties": {
-          "category": {
+          "jobType": {
             "type": "string",
-            "title": "Category"
+            "title": "Jobtype"
           },
-          "subscriptionRemaining": {
+          "priceCoins": {
             "type": "integer",
-            "title": "Subscriptionremaining"
+            "title": "Pricecoins"
           },
-          "subscriptionGranted": {
-            "type": "integer",
-            "title": "Subscriptiongranted"
-          },
-          "purchasedAvailable": {
-            "type": "integer",
-            "title": "Purchasedavailable"
+          "active": {
+            "type": "boolean",
+            "title": "Active"
           }
         },
         "type": "object",
         "required": [
-          "category",
-          "subscriptionRemaining",
-          "subscriptionGranted",
-          "purchasedAvailable"
+          "jobType",
+          "priceCoins",
+          "active"
         ],
-        "title": "AdminCategoryBalance"
+        "title": "AdminPriceResponse"
       },
       "AppleSignInRequest": {
         "properties": {
@@ -1739,19 +1814,22 @@
       },
       "BalanceResponse": {
         "properties": {
-          "balances": {
-            "items": {
-              "$ref": "#/components/schemas/CategoryBalance"
-            },
-            "type": "array",
-            "title": "Balances"
+          "coinsAvailable": {
+            "type": "integer",
+            "title": "Coinsavailable"
+          },
+          "coinsReserved": {
+            "type": "integer",
+            "title": "Coinsreserved"
           }
         },
         "type": "object",
         "required": [
-          "balances"
+          "coinsAvailable",
+          "coinsReserved"
         ],
-        "title": "BalanceResponse"
+        "title": "BalanceResponse",
+        "description": "Единый кошелёк монет пользователя."
       },
       "Body_upload_audio_v1_uploads_audio_post": {
         "properties": {
@@ -1794,47 +1872,6 @@
           "file"
         ],
         "title": "Body_upload_voice_v1_uploads_voice_post"
-      },
-      "CategoryBalance": {
-        "properties": {
-          "category": {
-            "type": "string",
-            "title": "Category"
-          },
-          "subscriptionRemaining": {
-            "type": "integer",
-            "title": "Subscriptionremaining"
-          },
-          "subscriptionGranted": {
-            "type": "integer",
-            "title": "Subscriptiongranted"
-          },
-          "periodEnd": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Periodend"
-          },
-          "purchasedAvailable": {
-            "type": "integer",
-            "title": "Purchasedavailable"
-          }
-        },
-        "type": "object",
-        "required": [
-          "category",
-          "subscriptionRemaining",
-          "subscriptionGranted",
-          "periodEnd",
-          "purchasedAvailable"
-        ],
-        "title": "CategoryBalance"
       },
       "ConsentRequest": {
         "properties": {
@@ -2252,17 +2289,12 @@
       },
       "GrantCreditsRequest": {
         "properties": {
-          "category": {
-            "type": "string",
-            "title": "Category",
-            "description": "song | cover | video"
-          },
-          "amount": {
+          "coins": {
             "type": "integer",
-            "maximum": 100000.0,
+            "maximum": 1000000.0,
             "minimum": 1.0,
-            "title": "Amount",
-            "description": "Сколько кредитов начислить."
+            "title": "Coins",
+            "description": "Сколько монет начислить."
           },
           "reason": {
             "anyOf": [
@@ -2280,36 +2312,19 @@
         },
         "type": "object",
         "required": [
-          "category",
-          "amount"
+          "coins"
         ],
         "title": "GrantCreditsRequest",
-        "description": "Начислить покупные (non-expiring) кредиты в указанную категорию."
+        "description": "Начислить монеты в кошелёк пользователя (non-expiring)."
       },
       "GrantSubscriptionRequest": {
         "properties": {
-          "song": {
+          "coins": {
             "type": "integer",
-            "maximum": 100000.0,
+            "maximum": 1000000.0,
             "minimum": 0.0,
-            "title": "Song",
-            "description": "Лимит генераций песен на период.",
-            "default": 0
-          },
-          "cover": {
-            "type": "integer",
-            "maximum": 100000.0,
-            "minimum": 0.0,
-            "title": "Cover",
-            "description": "Лимит каверов на период.",
-            "default": 0
-          },
-          "video": {
-            "type": "integer",
-            "maximum": 100000.0,
-            "minimum": 0.0,
-            "title": "Video",
-            "description": "Лимит видео на период.",
+            "title": "Coins",
+            "description": "Сколько монет начислить.",
             "default": 0
           },
           "periodDays": {
@@ -2337,7 +2352,7 @@
         },
         "type": "object",
         "title": "GrantSubscriptionRequest",
-        "description": "Активировать подписку и выдать периодные лимиты по категориям."
+        "description": "Активировать подписку и начислить монеты за период."
       },
       "GuestSignInRequest": {
         "properties": {
@@ -2776,6 +2791,41 @@
         ],
         "title": "PresetView"
       },
+      "PriceView": {
+        "properties": {
+          "jobType": {
+            "type": "string",
+            "title": "Jobtype"
+          },
+          "priceCoins": {
+            "type": "integer",
+            "title": "Pricecoins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobType",
+          "priceCoins"
+        ],
+        "title": "PriceView"
+      },
+      "PricingResponse": {
+        "properties": {
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/PriceView"
+            },
+            "type": "array",
+            "title": "Prices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prices"
+        ],
+        "title": "PricingResponse",
+        "description": "Активный прайс-лист платных типов генерации."
+      },
       "ProductView": {
         "properties": {
           "productId": {
@@ -2897,6 +2947,29 @@
         ],
         "title": "SessionResponse",
         "description": "Сессия. Используйте `token` как `Authorization: Bearer <token>`."
+      },
+      "SetPriceRequest": {
+        "properties": {
+          "priceCoins": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Pricecoins",
+            "description": "Цена типа генерации в монетах."
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "Активна ли строка прайс-листа.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "priceCoins"
+        ],
+        "title": "SetPriceRequest",
+        "description": "Обновить цену типа генерации в монетах."
       },
       "StageView": {
         "properties": {

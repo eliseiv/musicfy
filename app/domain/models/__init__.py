@@ -9,9 +9,9 @@ from app.domain.models.auth_identity import AuthIdentity  # noqa: F401,E402
 
 # Фаза 3 (billing / credits):
 from app.domain.models.billing import (  # noqa: F401,E402
-    CreditBalance,
+    CoinWallet,
     CreditLedgerEntry,
-    Entitlement,
+    GenerationPrice,
     Product,
     Purchase,
     SubscriptionState,

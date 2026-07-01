@@ -40,8 +40,7 @@ _TRUNCATE_TABLES = [
     "usage_events",
     "moderation_cases",
     "credit_ledger",
-    "credit_balances",
-    "entitlements",
+    "coin_wallets",
     "purchases",
     "subscription_state",
     "sessions",
@@ -49,6 +48,10 @@ _TRUNCATE_TABLES = [
     "processed_webhooks",
     "users",
 ]
+
+# Канонический прайс-лист (seed из миграции 0009). Пересеивается перед каждым тестом,
+# чтобы тесты, меняющие цену через admin PATCH, не протекали друг в друга.
+_CANONICAL_PRICES = (("song", 10), ("cover", 5), ("video", 30))
 
 
 @pytest_asyncio.fixture
@@ -76,5 +79,15 @@ async def clean_db():
         async with session.begin():
             for table in _TRUNCATE_TABLES:
                 await session.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
+            # Пересид прайс-листа до канонических значений (изоляция pricing-тестов).
+            await session.execute(text("TRUNCATE TABLE generation_prices CASCADE"))
+            for job_type, price in _CANONICAL_PRICES:
+                await session.execute(
+                    text(
+                        "INSERT INTO generation_prices (job_type, price_coins, active) "
+                        "VALUES (:jt, :pc, true)"
+                    ),
+                    {"jt": job_type, "pc": price},
+                )
     await engine.dispose()
     yield

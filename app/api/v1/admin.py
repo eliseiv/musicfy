@@ -7,15 +7,16 @@ from fastapi import APIRouter, Depends
 
 from app.api.errors import ValidationFailed
 from app.deps import get_admin_service, get_credits_service, require_admin
-from app.domain.enums import CreditCategory
+from app.domain.enums import JobType
 from app.domain.schemas.admin import (
     AdminBalanceResponse,
-    AdminCategoryBalance,
+    AdminPriceResponse,
     GrantCreditsRequest,
     GrantSubscriptionRequest,
+    SetPriceRequest,
 )
 from app.domain.services.admin_service import AdminService
-from app.domain.services.credits import EntitlementService
+from app.domain.services.credits import CoinWalletService
 
 router = APIRouter(
     prefix="/admin",
@@ -25,40 +26,36 @@ router = APIRouter(
 
 
 async def _balance_response(
-    credits: EntitlementService, user_id: UUID
+    credits: CoinWalletService, user_id: UUID
 ) -> AdminBalanceResponse:
-    views = await credits.balances(user_id=user_id)
+    view = await credits.wallet(user_id=user_id)
     return AdminBalanceResponse(
         user_id=str(user_id),
-        balances=[
-            AdminCategoryBalance(
-                category=v.category.value,
-                subscription_remaining=v.subscription_remaining,
-                subscription_granted=v.subscription_granted,
-                purchased_available=v.purchased_available,
-            )
-            for v in views
-        ],
+        coins_available=view.available,
+        coins_reserved=view.reserved,
     )
 
 
-def _parse_category(value: str) -> CreditCategory:
+def _parse_job_type(value: str) -> str:
     try:
-        return CreditCategory(value)
+        return JobType(value).value
     except ValueError as exc:
         raise ValidationFailed(
-            details={"field": "category", "allowed": ["song", "cover", "video"]}
+            details={
+                "field": "jobType",
+                "allowed": [t.value for t in JobType],
+            }
         ) from exc
 
 
 @router.get(
     "/users/{user_id}/balance",
     response_model=AdminBalanceResponse,
-    summary="Баланс пользователя",
+    summary="Баланс монет пользователя",
 )
 async def admin_balance(
     user_id: UUID,
-    credits: Annotated[EntitlementService, Depends(get_credits_service)],
+    credits: Annotated[CoinWalletService, Depends(get_credits_service)],
 ) -> AdminBalanceResponse:
     return await _balance_response(credits, user_id)
 
@@ -66,46 +63,34 @@ async def admin_balance(
 @router.post(
     "/users/{user_id}/credits",
     response_model=AdminBalanceResponse,
-    summary="Начислить кредиты (пак)",
+    summary="Начислить монеты",
 )
 async def admin_grant_credits(
     user_id: UUID,
     body: GrantCreditsRequest,
     admin: Annotated[AdminService, Depends(get_admin_service)],
-    credits: Annotated[EntitlementService, Depends(get_credits_service)],
+    credits: Annotated[CoinWalletService, Depends(get_credits_service)],
 ) -> AdminBalanceResponse:
-    await admin.grant_credits(
-        user_id=user_id,
-        category=_parse_category(body.category),
-        amount=body.amount,
-        reason=body.reason,
-    )
+    await admin.grant_credits(user_id=user_id, coins=body.coins, reason=body.reason)
     return await _balance_response(credits, user_id)
 
 
 @router.post(
     "/users/{user_id}/subscription",
     response_model=AdminBalanceResponse,
-    summary="Выдать подписку",
+    summary="Выдать подписку (начислить монеты)",
 )
 async def admin_grant_subscription(
     user_id: UUID,
     body: GrantSubscriptionRequest,
     admin: Annotated[AdminService, Depends(get_admin_service)],
-    credits: Annotated[EntitlementService, Depends(get_credits_service)],
+    credits: Annotated[CoinWalletService, Depends(get_credits_service)],
 ) -> AdminBalanceResponse:
-    grants = {
-        CreditCategory.song: body.song,
-        CreditCategory.cover: body.cover,
-        CreditCategory.video: body.video,
-    }
-    grants = {k: v for k, v in grants.items() if v > 0}
-    if not grants:
-        raise ValidationFailed(
-            details={"reason": "no_grants", "hint": "укажите song/cover/video > 0"}
-        )
     await admin.grant_subscription(
-        user_id=user_id, grants=grants, period_days=body.period_days, label=body.label
+        user_id=user_id,
+        coins=body.coins,
+        period_days=body.period_days,
+        label=body.label,
     )
     return await _balance_response(credits, user_id)
 
@@ -118,7 +103,24 @@ async def admin_grant_subscription(
 async def admin_revoke_subscription(
     user_id: UUID,
     admin: Annotated[AdminService, Depends(get_admin_service)],
-    credits: Annotated[EntitlementService, Depends(get_credits_service)],
+    credits: Annotated[CoinWalletService, Depends(get_credits_service)],
 ) -> AdminBalanceResponse:
     await admin.revoke_subscription(user_id=user_id)
     return await _balance_response(credits, user_id)
+
+
+@router.patch(
+    "/pricing/{job_type}",
+    response_model=AdminPriceResponse,
+    summary="Изменить цену типа генерации",
+)
+async def admin_set_price(
+    job_type: str,
+    body: SetPriceRequest,
+    admin: Annotated[AdminService, Depends(get_admin_service)],
+) -> AdminPriceResponse:
+    resolved = _parse_job_type(job_type)
+    jt, price, active = await admin.set_price(
+        job_type=resolved, price_coins=body.price_coins, active=body.active
+    )
+    return AdminPriceResponse(job_type=jt, price_coins=price, active=active)

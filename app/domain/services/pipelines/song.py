@@ -224,8 +224,7 @@ class SongPipeline(BasePipeline):
             if probed and probed > 0:
                 duration = probed
 
-        used_units = max(1, round((duration or 0) / 60)) if duration else 1
-        captured = await self._capture_credits(job_id, used_units)
+        captured = await self._capture_credits(job_id)
 
         await self._record_stage(job_id, JobStage.finalize, "running")
         async with self._sessionmaker() as session:

@@ -43,6 +43,25 @@ async def emit_fal_completed(
     )
 
 
+async def emit_fal_error(client, request_id: str, *, error: str = "model inference failed"):
+    # Реальный fal queue ERROR-конверт (TD-003): {request_id,status:"ERROR",error,payload}.
+    # Парсер маппит ERROR → failed; webhook-route переводит job в failed и делает refund.
+    body = json.dumps(
+        {
+            "request_id": request_id,
+            "status": "ERROR",
+            "error": error,
+            "payload": {"detail": [{"loc": ["body"], "msg": "invalid"}]},
+        }
+    ).encode("utf-8")
+    sig = compute_signature(WEBHOOK_SECRET, body)
+    return await client.post(
+        "/v1/webhooks/fal",
+        content=body,
+        headers={"X-Fal-Signature": sig, "Content-Type": "application/json"},
+    )
+
+
 def make_signed_transaction(
     *,
     product_id: str,
@@ -66,22 +85,39 @@ def make_signed_transaction(
     return jwt.encode(claims, "test-key", algorithm="HS256")
 
 
+ADMIN_HEADERS = {"Authorization": "Bearer test-admin-key"}
+
+
 async def auth_headers(client) -> dict:
     token = (await client.post("/v1/auth/guest", json={})).json()["token"]
     return {"Authorization": f"Bearer {token}"}
 
 
-async def grant_weekly_subscription(client, headers) -> None:
-    """Выдаёт недельную подписку текущему пользователю через purchases/verify."""
-    import time
+async def auth_user(client) -> tuple[str, dict]:
+    """Возвращает (user_id, headers) для нового гостевого пользователя."""
+    r = (await client.post("/v1/auth/guest", json={})).json()
+    return r["userId"], {"Authorization": f"Bearer {r['token']}"}
 
-    expires_ms = int((time.time() + 7 * 86400) * 1000)
-    signed = make_signed_transaction(
-        product_id="com.musicfy.sub.weekly",
-        transaction_id=f"tx-{headers['Authorization'][-8:]}",
-        expires_date_ms=expires_ms,
-    )
+
+async def grant_coins(client, headers, coins: int = 100) -> None:
+    """Начисляет монеты текущему пользователю (из headers) через admin /credits.
+
+    Достаточно для любой генерации (song=10, cover=5, video=30) в E2E-тестах.
+    """
+    me = (await client.get("/v1/auth/me", headers=headers)).json()
+    user_id = me["userId"]
     resp = await client.post(
-        "/v1/billing/purchases/verify", json={"signedTransaction": signed}, headers=headers
+        f"/v1/admin/users/{user_id}/credits",
+        json={"coins": coins, "reason": "test grant"},
+        headers=ADMIN_HEADERS,
     )
     assert resp.status_code == 200, resp.text
+
+
+async def grant_weekly_subscription(client, headers) -> None:
+    """Начисляет монеты текущему пользователю (совместимость с E2E-тестами).
+
+    Раньше выдавала недельную подписку с per-category лимитами; в монетной модели
+    просто пополняет единый кошелёк достаточным балансом для генераций.
+    """
+    await grant_coins(client, headers, coins=100)

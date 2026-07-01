@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 class CreditGate(Protocol):
-    """Интерфейс списания кредитов. В Фазе 3 реализуется EntitlementService."""
+    """Интерфейс списания монет. Реализуется CoinWalletService."""
 
-    async def capture(self, *, job: Job, used_units: int) -> int: ...
+    async def capture(self, *, job: Job) -> int: ...
 
     async def release(self, *, job: Job) -> None: ...
 
@@ -152,14 +152,14 @@ class BasePipeline:
                     job_id=job_id, error_code=error_code, error_message=error_message
                 )
 
-    async def _capture_credits(self, job_id: UUID, used_units: int) -> int:
+    async def _capture_credits(self, job_id: UUID) -> int:
         if self._credits is None:
             return 0
         job = await self.load_job(job_id)
         if job is None:
             return 0
         try:
-            return await self._credits.capture(job=job, used_units=used_units)
+            return await self._credits.capture(job=job)
         except Exception:
             logger.exception("credit capture failed for job=%s", job_id)
             return 0

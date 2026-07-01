@@ -6,6 +6,8 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -49,8 +51,7 @@ class Product(Base, TimestampMixin):
         SAEnum(ProductKind, name="product_kind", native_enum=True), nullable=False
     )
     title: Mapped[str] = mapped_column(String(128), nullable=False)
-    # Для паков — сколько кредитов начисляется по категориям: {"song": 10, "cover": 5}.
-    # Для подписок — лимиты entitlements на период по категориям.
+    # Сколько монет начисляется покупкой: {"coins": N}. Для подписок — монеты за период.
     grants: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -87,12 +88,14 @@ class SubscriptionState(Base, TimestampMixin):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class Entitlement(Base, TimestampMixin):
-    """Подписочный лимит по категории на текущий период (сгорает)."""
+class CoinWallet(Base, TimestampMixin):
+    """Единый кошелёк монет пользователя (одна строка на юзера, монеты non-expiring)."""
 
-    __tablename__ = "entitlements"
+    __tablename__ = "coin_wallets"
     __table_args__ = (
-        UniqueConstraint("user_id", "category", name="uq_entitlements_user_id_category"),
+        UniqueConstraint("user_id", name="uq_coin_wallets_user_id"),
+        CheckConstraint("coins_available >= 0", name="ck_coin_wallets_available_nonneg"),
+        CheckConstraint("coins_reserved >= 0", name="ck_coin_wallets_reserved_nonneg"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -102,38 +105,34 @@ class Entitlement(Base, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    category: Mapped[CreditCategory] = mapped_column(
-        SAEnum(CreditCategory, name="credit_category", native_enum=True, create_type=False),
-        nullable=False,
+    coins_available: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0"), default=0
     )
-    granted: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    used: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_product_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    coins_reserved: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0"), default=0
+    )
 
 
-class CreditBalance(Base, TimestampMixin):
-    """Покупные кредиты по категории (non-expiring)."""
+class GenerationPrice(Base, TimestampMixin):
+    """Прайс-лист: цена типа генерации в монетах. Меняется admin-эндпоинтом."""
 
-    __tablename__ = "credit_balances"
+    __tablename__ = "generation_prices"
     __table_args__ = (
-        UniqueConstraint("user_id", "category", name="uq_credit_balances_user_id_category"),
+        UniqueConstraint("job_type", name="uq_generation_prices_job_type"),
+        CheckConstraint("price_coins >= 0", name="ck_generation_prices_price_nonneg"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PgUUID(as_uuid=True), primary_key=True,
         server_default=text("gen_random_uuid()"), default=uuid.uuid4,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    # Значение из JobType (song / cover / video). String, а не enum — прайс-лист
+    # независим от credit-категорий и расширяется без миграции enum.
+    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    price_coins: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
     )
-    category: Mapped[CreditCategory] = mapped_column(
-        SAEnum(CreditCategory, name="credit_category", native_enum=True, create_type=False),
-        nullable=False,
-    )
-    available: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    reserved: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
 
 
 class CreditLedgerEntry(Base):

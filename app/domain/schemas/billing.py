@@ -7,16 +7,22 @@ from pydantic import Field
 from app.schemas.common import CamelModel
 
 
-class CategoryBalance(CamelModel):
-    category: str
-    subscription_remaining: int
-    subscription_granted: int
-    period_end: datetime | None
-    purchased_available: int
-
-
 class BalanceResponse(CamelModel):
-    balances: list[CategoryBalance]
+    """Единый кошелёк монет пользователя."""
+
+    coins_available: int
+    coins_reserved: int
+
+
+class PriceView(CamelModel):
+    job_type: str
+    price_coins: int
+
+
+class PricingResponse(CamelModel):
+    """Активный прайс-лист платных типов генерации."""
+
+    prices: list[PriceView]
 
 
 class ProductView(CamelModel):

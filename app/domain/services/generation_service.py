@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.errors import FalProviderError, FalTimeout
 from app.config import Settings
-from app.domain.enums import JOB_TYPE_TO_CATEGORY, JobType
+from app.domain.enums import JobType
 from app.domain.repositories.jobs import JobsRepository
 from app.domain.services.pipelines.runner import PipelineRunner
 
@@ -59,8 +59,6 @@ class GenerationService:
         store_stems: bool = False,
         client_idempotency_key: str | None = None,
     ) -> CreateJobResult:
-        category = JOB_TYPE_TO_CATEGORY.get(job_type)
-
         # Модерация текстового ввода (prompt / lyrics / title).
         if self._moderation is not None:
             reason = self._moderation.screen_text(
@@ -90,14 +88,13 @@ class GenerationService:
                 if existing is not None:
                     return CreateJobResult(job_id=existing.id, deduplicated=True)
 
-        # Резерв кредитов: сначала подписка, затем покупные паки (EntitlementService).
+        # Резерв монет по цене типа генерации из прайс-листа (CoinWalletService).
+        # Бесплатный тип (цена 0) → reserve вернёт 0, резерв не выполняется.
         reserved = 0
-        if self._credits is not None and category is not None:
-            source = await self._credits.reserve(
-                user_id=user_id, category=category, units=1
+        if self._credits is not None:
+            reserved = await self._credits.reserve(
+                user_id=user_id, job_type=job_type.value
             )
-            reserved = 1
-            payload = {**payload, "_credit_source": source.value}
 
         async with self._sessionmaker() as session:
             async with session.begin():
@@ -107,7 +104,7 @@ class GenerationService:
                     job_type=job_type,
                     input_payload=payload,
                     provider_model=self._provider_model(job_type),
-                    credit_category=category,
+                    credit_category=None,
                     reserved_credits=reserved,
                     store_stems=store_stems,
                     client_idempotency_key=client_idempotency_key,

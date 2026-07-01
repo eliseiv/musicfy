@@ -27,51 +27,32 @@ async def _reassign_simple(session: AsyncSession, frm: UUID, to: UUID) -> None:
         )
 
 
-async def _merge_credit_balances(session: AsyncSession, frm: UUID, to: UUID) -> None:
-    # Суммируем покупные кредиты гостя в аккаунт назначения по категориям.
+async def _merge_coin_wallets(session: AsyncSession, frm: UUID, to: UUID) -> None:
+    # Переносим монеты гостя в кошелёк целевого аккаунта: суммируем available и
+    # reserved, затем удаляем гостевой кошелёк. Идемпотентно — после удаления
+    # гостевой строки повторный вызов ничего не переносит.
     await session.execute(
         text(
             """
-            INSERT INTO credit_balances (user_id, category, available, reserved)
-            SELECT :to, category, available, reserved FROM credit_balances WHERE user_id = :frm
-            ON CONFLICT (user_id, category) DO UPDATE
-            SET available = credit_balances.available + EXCLUDED.available,
-                reserved = credit_balances.reserved + EXCLUDED.reserved
+            INSERT INTO coin_wallets (user_id, coins_available, coins_reserved)
+            SELECT :to, coins_available, coins_reserved
+            FROM coin_wallets WHERE user_id = :frm
+            ON CONFLICT (user_id) DO UPDATE
+            SET coins_available = coin_wallets.coins_available + EXCLUDED.coins_available,
+                coins_reserved = coin_wallets.coins_reserved + EXCLUDED.coins_reserved,
+                updated_at = now()
             """
         ),
         {"to": to, "frm": frm},
     )
     await session.execute(
-        text("DELETE FROM credit_balances WHERE user_id = :frm"), {"frm": frm}
-    )
-
-
-async def _merge_entitlements(session: AsyncSession, frm: UUID, to: UUID) -> None:
-    # Entitlements переносим только для категорий, которых нет у целевого аккаунта
-    # (у постоянного аккаунта подписка приоритетнее гостевой).
-    await session.execute(
-        text(
-            """
-            INSERT INTO entitlements
-                (user_id, category, granted, used, period_start, period_end,
-                 source_product_external_id)
-            SELECT :to, category, granted, used, period_start, period_end,
-                   source_product_external_id
-            FROM entitlements WHERE user_id = :frm
-            ON CONFLICT (user_id, category) DO NOTHING
-            """
-        ),
-        {"to": to, "frm": frm},
-    )
-    await session.execute(
-        text("DELETE FROM entitlements WHERE user_id = :frm"), {"frm": frm}
+        text("DELETE FROM coin_wallets WHERE user_id = :frm"), {"frm": frm}
     )
 
 
 async def reassign_all(session: AsyncSession, frm: UUID, to: UUID) -> None:
     await _reassign_simple(session, frm, to)
-    await _merge_credit_balances(session, frm, to)
-    await _merge_entitlements(session, frm, to)
+    await _merge_coin_wallets(session, frm, to)
 
 
 def register() -> None:

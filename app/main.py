@@ -19,7 +19,7 @@ from app.domain.services.admin_service import AdminService
 from app.domain.services.analytics_service import AnalyticsService
 from app.domain.services.asset_service import AssetService
 from app.domain.services.billing_service import BillingService
-from app.domain.services.credits import EntitlementService
+from app.domain.services.credits import CoinWalletService
 from app.domain.services.generation_service import GenerationService
 from app.domain.services.lyrics_service import LyricsService
 from app.domain.services.merge import register as register_merge_reassigners
@@ -97,7 +97,7 @@ def create_app(
         )
 
         # Кредиты / биллинг.
-        credits = EntitlementService(app.state.sessionmaker)
+        credits = CoinWalletService(app.state.sessionmaker)
         app.state.credits_service = credits
         app.state.billing_service = BillingService(
             app.state.sessionmaker,
@@ -130,7 +130,9 @@ def create_app(
             app.state.asset_service = AssetService(app.state.sessionmaker, fal)
 
             try:
-                recovered = await recover_orphan_jobs(sessionmaker=app.state.sessionmaker)
+                recovered = await recover_orphan_jobs(
+                    sessionmaker=app.state.sessionmaker, credits=credits
+                )
                 if recovered:
                     logger.info("Recovered %d orphan jobs on startup", recovered)
                 stuck = await report_received_webhooks(sessionmaker=app.state.sessionmaker)
