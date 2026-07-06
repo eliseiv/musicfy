@@ -30,9 +30,9 @@ async def test_presets_voices_returns_catalog_camel_case(client):
     assert "sampleDurationSeconds" in first
     assert "preview_url" not in first
     assert "sample_duration_seconds" not in first
-    # Превью ещё не забэкфилены (бэкфилл-миграция 0013) → NULL допустим.
-    assert first["previewUrl"] is None
-    assert first["sampleDurationSeconds"] is None
+    # Превью забэкфилены миграцией 0014 (реальные fal-URL) → непустые.
+    assert isinstance(first["previewUrl"], str) and first["previewUrl"]
+    assert isinstance(first["sampleDurationSeconds"], int)
 
 
 @pytest.mark.asyncio
