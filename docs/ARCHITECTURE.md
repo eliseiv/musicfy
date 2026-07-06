@@ -127,6 +127,134 @@ app/
 С реализацией этого контракта поллер-fallback (`FalPoller`) перестал быть единственным путём
 терминализации error-задачи: webhook сразу падает с явной причиной из конверта fal.
 
+## Голоса: пресет-каталог (AI Voices) + резолв targetVoice
+
+Решение — [ADR-006](./adr/ADR-006-preset-voices-catalog.md).
+
+Экран Create Cover предлагает голос для кавера из двух источников: **каталог пресет-голосов**
+(вкладка «AI Voices») и **собственные клоны** пользователя (вкладка «My Clones», `VoiceProfile`).
+
+- **Справочник `preset_voices`** (образец `prompt_presets`): `key` (публичный, unique), `title`,
+  `subtitle`, `provider_voice` (**внутренний** id голоса fal voice-changer — наружу не отдаётся),
+  `preview_url` / `sample_duration_seconds` (▶️), `gender` / `style` / `language` (строки, без
+  enum), `sort_order`, `active`, `meta`. Эндпоинт `GET /v1/presets/voices` → `list[PresetVoiceView]`
+  (только активные, сортировка `sort_order, title`); схема **без** `provider_voice`.
+- **Резолв `cover.targetVoice`** (в `generation_service.create_job`, `JobType.cover`): значение
+  валидно если пустое **или** UUID собственного `ready`-клона **или** активный `key` пресета;
+  иначе `ValidationFailed(reason="unknown_voice")` (422). **Инвариант:** при совпадении с ключом
+  пресета `payload["target_voice"]` переписывается на резолвнутое `provider_voice` **до** сохранения
+  job — в fal уходит провайдерское значение, наружу клиент оперирует только `key`.
+- **Превью** заполняются оффлайн (отдельная бэкфилл-миграция следующим свободным номером, напр.
+  `0014_seed_preset_voice_previews`; **ещё не создана, отложена** → [TD-006](./100-known-tech-debt.md#td-006)),
+  не в request-флоу: `NULL` в `preview_url` допустим (▶️ пресетов неактивна до бэкфилла). Профиль
+  клона (`VoiceProfileResponse`) отдаёт `previewUrl`
+  (из `voice_profiles.sample_asset_url`) и `sampleDurationSeconds` (новая колонка, best-effort
+  `probe_duration_seconds`).
+
+## Видео: режимы генерации (Avatar / Visual Clip / Lyrics Video)
+
+Решение — [ADR-007](./adr/ADR-007-video-three-modes.md).
+
+`CreateVideoRequest.mode` (`VideoMode` enum) ветвит **выбор fal-модели** и **набор стадий**
+пайплайна; общий финал (`upload_cdn` → capture → `Asset` → `mark_succeeded` → push)
+переиспользуется. Цена единая `video=30` (ADR-005), инварианты монет reserve→capture→release
+не меняются.
+
+**Маппинг режима → fal-модель** (env `FAL_VIDEO_*` в `config.py`, `_provider_model` для
+`JobType.video` вычисляет модель по `mode` + наличию reference/source; `job.provider_model` обязан
+совпадать с реально вызванной моделью — его опрашивает `FalPoller`):
+
+| Режим | Условие | Модель (env) |
+|---|---|---|
+| avatar_performance | `sourceVideoUrl` | `FAL_VIDEO_AVATAR_MODEL` (текущий kling lipsync) |
+| avatar_performance | только `referenceImageUrl` | `FAL_VIDEO_AVATAR_IMAGE_MODEL` |
+| visual_clip | без референса | `FAL_VIDEO_VISUAL_MODEL` (t2v) |
+| visual_clip | с `referenceImageUrl` | `FAL_VIDEO_VISUAL_IMAGE_MODEL` (i2v) |
+| lyrics_video | всегда (async t2v-фон под бёрн-ин лирики) | `FAL_VIDEO_LYRICS_BG_MODEL` (t2v, дефолт задан) |
+
+**Инвариант async (все режимы, ADR-007 §3a):** `pipeline.start()` вызывается **инлайн** в
+`create_job` внутри HTTP-хендлера `POST /v1/videos` (`generation_service.py:192` → `runner.py:53`).
+Поэтому `start()` во всех режимах — только дешёвые операции + **fal-submit** (возвращает
+`request_id`, ставит `current_stage`/`provider_request_id`), POST отдаёт `202` мгновенно. Тяжёлый
+ffmpeg-рендер / мукс / бёрн-ин лирики / upload — **запрещены на request-пути** и выполняются
+**только в `advance()`** (фон webhook/поллера, образец `cover._mix`). Синхронный ffmpeg в `start()`
+заблокировал бы POST (таймаут Traefik/uvicorn) и породил бы ложный orphan-recovery.
+
+**Стадии пайплайна** (`pipelines/video.py`, `ASYNC_STAGES`; ffmpeg-вызов синхронен внутри
+`advance()`, образец `cover._mix` / `audio_mixer.py`, новый `video_mux.py`):
+
+- **Avatar Performance:** `submit_lipsync_video` (video) / `submit_avatar_image_video` (image) →
+  финал. Аудио вшито моделью, мукс не нужен.
+- **Avatar Performance:** image-ветка (`submit_avatar_image_video`, только `referenceImageUrl`)
+  **переиспользует `JobStage.lipsync`** — отдельной стадии нет; в `advance()` `completed_stage =
+  lipsync` (совпадает с `current_stage`-guard), `idempotency_key = {job.id}:avatar`.
+- **Visual Clip:** `prepare_prompt` → `visual_gen` (async fal) → **`mux_audio`** (ffmpeg) →
+  `upload_cdn` → `finalize`. fal t2v/i2v выдаёт клип на **секунды**, трек — **минуты**; наивный
+  `-shortest` обрезал бы видео до длины короткого клипа, поэтому границей ставится **длина
+  аудио-трека** (`probe_duration_seconds`), а видео **зацикливается/растягивается** под неё
+  (`-stream_loop`/concat) — рекомендуемая стратегия. Сбой ffmpeg → немое видео + `quality_flag`.
+- **Lyrics Video (async, симметричен visual_clip):** `prepare_prompt` → `source_prep` (лирика +
+  длительность, дёшево, без ffmpeg) → **`visual_gen`** (async fal **t2v-фон**,
+  `FAL_VIDEO_LYRICS_BG_MODEL`, submit в `start()`, `idempotency_key={job.id}:lyrics_bg`) →
+  [webhook/poller → `advance()`] → **`lyrics_render`** (ffmpeg subtitles/drawtext поверх
+  сгенерированного фона) → мукс (длина = длина трека) → `upload_cdn` → `finalize`. **Вся
+  ffmpeg-работа и upload — в `advance()`** (не в `start()`); `advance()` при `visual_gen` ветвит по
+  `mode`: visual_clip → `mux_audio`, lyrics_video → `render_lyrics_video`(фон=`media_url` от fal) +
+  мукс. `job.provider_model = FAL_VIDEO_LYRICS_BG_MODEL` (**не** `None`), `provider_request_id`
+  выставлен в `start()` → poller/webhook ведут job как у visual_clip; инварианты монет
+  reserve→capture→release сохранены. V1-синхронизация лирики — равномерное распределение строк (см.
+  [TD-004](./100-known-tech-debt.md#td-004)), но исполняется async. **Лирика — из
+  `Job.input_payload['_lyrics']`**, а **не** из `Track.meta`: song-пайплайн пишет `_lyrics` в
+  `input_payload` задачи-песни (`song.py:37,58`), `Track.meta` содержит лишь `{"runtime": ...}`
+  (`song.py:243`). При `trackId` резолв: `Track.job_id` (колонка есть, `track.py:46`) →
+  `JobsRepository.get_by_id` → `input_payload['_lyrics']` (обратный доступ track→job — задача
+  backend; альтернатива — писать `_lyrics` в `Track.meta` в `song.py`); без трека — явное поле
+  `lyrics` запроса. **Статический фон без fal** (полностью синхронный пайплайн, `provider_model=None`)
+  — **отложен** (требует background job runner, которого нет; синхронный рендер в request-пути
+  запрещён, ADR-007 §3a).
+
+Новые `JobStage`: `visual_gen`, `mux_audio`, `lyrics_render` (+резерв `align_lyrics` под V2) —
+`job_stage` **нативный PG enum**, требует миграции `ALTER TYPE ... ADD VALUE`. `VideoStyle` /
+`VideoAspect` / `VideoMode` живут строками в `Asset.meta` (без PG-типа). Референс-картинка —
+`POST /v1/uploads/image` (`AssetKind.image`); `trackId` резолвится в `audio_url` через
+`TracksRepository` с проверкой владельца (для lyrics_video лирика — дополнительно из `Job` по
+`track.job_id`, см. выше); «Surprise me» — случайный шаблон из `prompt_presets`,
+проходит модерацию.
+
+`Asset.meta` для видео-результата: `mode`, `style`, `aspect_ratio`, `quality_flag` (флаг
+деградации ffmpeg). `VideoResultResponse` отдаёт `mode` / `aspectRatio` / `style` из `Asset.meta`.
+
+## Контракты API — новые/изменённые (ADR-006 / ADR-007)
+
+> `docs/openapi.json` перегенерируется backend после реализации. Ниже — целевой контракт.
+
+**Голоса (ADR-006):**
+- `GET /v1/presets/voices` (**новый**) → `200 list[PresetVoiceView]`.
+  `PresetVoiceView` = `{ key, title, subtitle?, previewUrl?, sampleDurationSeconds?, gender?,
+  style?, language? }`. Только активные; **без** `provider_voice`.
+- `VoiceProfileResponse` (**изменён, аддитивно**) — добавлены `previewUrl?`, `sampleDurationSeconds?`.
+- `cover.targetVoice` (**ЛОМАЮЩЕЕ**): было freeform-строкой, стало — пусто **или** UUID своего
+  `ready`-клона **или** активный `key` пресета. Неизвестное значение → `422 { reason:
+  "unknown_voice" }`.
+
+**Видео (ADR-007):**
+- `POST /v1/uploads/image` (**новый**) → `AssetResponse` (образец `/uploads/source-video`,
+  `AssetKind.image`, `UPLOAD_IMAGE_CONTENT_TYPES`).
+- `CreateVideoRequest` (**ЛОМАЮЩЕЕ**): `mode` из freeform-строки-с-default стал обязательным
+  `VideoMode`; добавлены `trackId?`, `variantId?`, `referenceImageUrl?`, `style?`, `aspectRatio?`
+  (default `9:16`), `prompt?`, `surpriseMe` (default false); `audioUrl` / `sourceVideoUrl` больше
+  не всегда обязательны — условны по режиму (`model_validator._validate_by_mode`). Источник аудио —
+  `audioUrl` XOR `trackId`.
+- `VideoResultResponse` (**изменён, аддитивно**) — добавлены `mode`, `aspectRatio`, `style`.
+
+**Статусы валидации (единый контракт всех эндпоинтов):**
+- **Схемная валидация тела** (Pydantic: отсутствие обязательного поля, неверный enum, провал
+  `model_validator`) → `RequestValidationError` → `validation_handler` → **`400 INVALID_INPUT`**
+  (фикс `validation_handler`: сериализация деталей не может уронить хендлер в 500, статус всегда 400).
+- **Endpoint-level `ValidationFailed`** (бизнес-проверка уже после схемы: `unknown_variant`,
+  `track_has_no_audio`, `unknown_voice`) → **`422`** (класс `ValidationFailed` с явным
+  `http_status=422`, код тела остаётся `INVALID_INPUT`).
+
 ## Кредиты и лимиты
 
 Единый кошелёк монет (решение [ADR-005](./adr/ADR-005-coin-wallet-billing.md); переход с

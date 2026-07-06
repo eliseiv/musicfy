@@ -38,10 +38,11 @@ async def test_voice_clone_happy_path(client):
     assert consent.status_code == 200, consent.text
     consent_id = consent.json()["id"]
 
+    sample_url = "https://cdn.local/voice.wav"
     resp = await client.post(
         "/v1/voices",
         json={
-            "sampleAssetUrl": "https://cdn.local/voice.wav",
+            "sampleAssetUrl": sample_url,
             "consentId": consent_id,
             "name": "My Voice",
         },
@@ -51,10 +52,21 @@ async def test_voice_clone_happy_path(client):
     body = resp.json()
     assert body["status"] == "ready"
     assert body["providerVoiceId"]
+    # VoiceProfileResponse: previewUrl == sample_asset_url, sampleDurationSeconds присутствует.
+    assert "previewUrl" in body
+    assert body["previewUrl"] == sample_url
+    assert "sampleDurationSeconds" in body
+    # sample_duration_seconds заполняется best-effort (probe недоступного URL → null допустим).
+    assert body["sampleDurationSeconds"] is None or isinstance(body["sampleDurationSeconds"], int)
 
     library = (await client.get("/v1/voices", headers=headers)).json()
     assert len(library) == 1
-    assert library[0]["name"] == "My Voice"
+    item = library[0]
+    assert item["name"] == "My Voice"
+    # Те же поля в list-представлении.
+    assert item["previewUrl"] == sample_url
+    assert "sampleDurationSeconds" in item
+    assert item["sampleDurationSeconds"] is None or isinstance(item["sampleDurationSeconds"], int)
 
 
 @pytest.mark.asyncio

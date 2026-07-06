@@ -36,5 +36,7 @@ class VoiceProfileResponse(CamelModel):
     name: str | None
     status: str
     provider_voice_id: str | None = None
+    preview_url: str | None = None
+    sample_duration_seconds: int | None = None
     job_id: str | None = None
     created_at: datetime

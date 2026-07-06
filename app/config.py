@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import uuid
 from functools import lru_cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from pydantic import SecretStr, computed_field, field_validator
+if TYPE_CHECKING:
+    from app.domain.enums import VideoMode
+
+from pydantic import SecretStr, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _API_KEY_NAMESPACE = uuid.UUID("9c1d6f1a-2e44-4d0b-8a3c-7e1d2f4b6a90")
+
+# Легаси-дефолт видео-модели (kling lipsync). Используется для алиаса FAL_VIDEO_MODEL →
+# FAL_VIDEO_AVATAR_MODEL: старые конфиги, задающие FAL_VIDEO_MODEL, продолжают работать.
+_DEFAULT_VIDEO_AVATAR_MODEL = "fal-ai/kling-video/lipsync/audio-to-video"
 
 
 class Settings(BaseSettings):
@@ -59,7 +66,19 @@ class Settings(BaseSettings):
     FAL_LYRICS_LLM: str = "anthropic/claude-3-5-haiku"
     FAL_DEMUCS_MODEL: str = "fal-ai/demucs"
     FAL_VOICE_CHANGER_MODEL: str = "fal-ai/elevenlabs/voice-changer"
-    FAL_VIDEO_MODEL: str = "fal-ai/kling-video/lipsync/audio-to-video"
+    # Видео-модели по режиму (ADR-007). FAL_VIDEO_MODEL — легаси-алиас avatar-модели.
+    FAL_VIDEO_MODEL: str = _DEFAULT_VIDEO_AVATAR_MODEL
+    # avatar_performance + source video (липсинк «видео→видео»).
+    FAL_VIDEO_AVATAR_MODEL: str = _DEFAULT_VIDEO_AVATAR_MODEL
+    # avatar_performance + только референс-картинка (липсинк «фото→видео»).
+    FAL_VIDEO_AVATAR_IMAGE_MODEL: str = "fal-ai/sync-lipsync/v3/image-to-video"
+    # visual_clip без референса (text-to-video).
+    FAL_VIDEO_VISUAL_MODEL: str = "bytedance/seedance-2.0/text-to-video"
+    # visual_clip с референс-картинкой (image-to-video).
+    FAL_VIDEO_VISUAL_IMAGE_MODEL: str = "bytedance/seedance-2.0/image-to-video"
+    # lyrics_video: генеративный t2v-фон fal, поверх которого бёрнится лирика (ADR-007 §3,
+    # режим async — всегда в V1, поэтому дефолт не пустой; см. §3a).
+    FAL_VIDEO_LYRICS_BG_MODEL: str = "bytedance/seedance-2.0/text-to-video"
 
     # --- App Store (StoreKit 2) ---
     APPLE_STOREKIT_ISSUER_ID: str = ""
@@ -86,6 +105,7 @@ class Settings(BaseSettings):
         "audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/aac"
     )
     UPLOAD_VIDEO_CONTENT_TYPES: str = "video/mp4,video/quicktime"
+    UPLOAD_IMAGE_CONTENT_TYPES: str = "image/jpeg,image/png,image/webp"
     DEFAULT_TRACK_DURATION_SECONDS: int = 60
     JOB_HARD_TIMEOUT_SECONDS: int = 1800
     VIDEO_JOB_HARD_TIMEOUT_SECONDS: int = 5400
@@ -103,6 +123,48 @@ class Settings(BaseSettings):
         if isinstance(v, str) and v.strip() == "":
             return None
         return v
+
+    @model_validator(mode="after")
+    def _apply_video_avatar_alias(self) -> Settings:
+        # Обратная совместимость: если задан только легаси FAL_VIDEO_MODEL (а новый
+        # FAL_VIDEO_AVATAR_MODEL оставлен по умолчанию) — используем легаси-значение.
+        if (
+            self.FAL_VIDEO_AVATAR_MODEL == _DEFAULT_VIDEO_AVATAR_MODEL
+            and self.FAL_VIDEO_MODEL != _DEFAULT_VIDEO_AVATAR_MODEL
+        ):
+            self.FAL_VIDEO_AVATAR_MODEL = self.FAL_VIDEO_MODEL
+        return self
+
+    def video_provider_model(
+        self,
+        mode: VideoMode,
+        *,
+        has_reference_image: bool,
+        has_source_video: bool,
+    ) -> str | None:
+        """Возвращает fal-модель для видео-задачи по режиму и наличию source/reference.
+
+        lyrics_video (ADR-007 §3/§3a, режим async) — генеративный t2v-фон
+        `FAL_VIDEO_LYRICS_BG_MODEL` (НЕ None): `start()` делает fal-submit фона, поллер/webhook
+        ведут задачу по этой модели, а бёрн-ин лирики + мукс — в `advance()`. Инвариант:
+        значение обязано совпадать с моделью, которую реально дёрнет submit-метод провайдера.
+        """
+        from app.domain.enums import VideoMode
+
+        if mode == VideoMode.avatar_performance:
+            return (
+                self.FAL_VIDEO_AVATAR_MODEL
+                if has_source_video
+                else self.FAL_VIDEO_AVATAR_IMAGE_MODEL
+            )
+        if mode == VideoMode.visual_clip:
+            return (
+                self.FAL_VIDEO_VISUAL_IMAGE_MODEL
+                if has_reference_image
+                else self.FAL_VIDEO_VISUAL_MODEL
+            )
+        # lyrics_video: t2v-фон под бёрн-ин лирики (async, симметрично visual_clip).
+        return self.FAL_VIDEO_LYRICS_BG_MODEL
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -135,6 +197,11 @@ class Settings(BaseSettings):
     @property
     def upload_video_content_types(self) -> set[str]:
         return {c.strip() for c in self.UPLOAD_VIDEO_CONTENT_TYPES.split(",") if c.strip()}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def upload_image_content_types(self) -> set[str]:
+        return {c.strip() for c in self.UPLOAD_IMAGE_CONTENT_TYPES.split(",") if c.strip()}
 
 
 @lru_cache(maxsize=1)

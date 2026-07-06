@@ -8,6 +8,7 @@ from app.domain.enums import JobStage, JobStatus, VoiceProfileStatus
 from app.domain.models.job import Job
 from app.domain.repositories.jobs import JobsRepository
 from app.domain.repositories.voice import VoiceRepository
+from app.domain.services.audio_duration import probe_duration_seconds
 from app.domain.services.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,12 @@ class VoiceClonePipeline(BasePipeline):
 
         # finalize
         await self._mark_status(job.id, JobStatus.post_processing)
+        # Длительность образца — best-effort (null допустим), для ▶️ в My Clones.
+        duration: int | None = None
+        if sample_url:
+            probed = await probe_duration_seconds(sample_url)
+            if probed and probed > 0:
+                duration = int(round(probed))
         async with self._sessionmaker() as session:
             async with session.begin():
                 if profile_id:
@@ -71,6 +78,7 @@ class VoiceClonePipeline(BasePipeline):
                         profile_id=UUID(profile_id),
                         provider_voice_id=voice_id,
                         status=VoiceProfileStatus.ready,
+                        sample_duration_seconds=duration,
                     )
                 await JobsRepository(session).mark_succeeded(job_id=job.id, captured_credits=0)
         await self._record_stage(job.id, JobStage.finalize, "succeeded")

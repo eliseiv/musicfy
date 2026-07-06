@@ -77,3 +77,16 @@ async def upload_source_video(
         file=file, kind=AssetKind.source_video, allowed=settings.upload_video_content_types,
         assets=assets, settings=settings, user=current,
     )
+
+
+@router.post("/image", response_model=AssetResponse, summary="Загрузить картинку-референс")
+async def upload_image(
+    current: Annotated[User, Depends(get_current_user)],
+    assets: Annotated[AssetService, Depends(get_asset_service)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    file: Annotated[UploadFile, File()],
+) -> AssetResponse:
+    return await _store(
+        file=file, kind=AssetKind.image, allowed=settings.upload_image_content_types,
+        assets=assets, settings=settings, user=current,
+    )

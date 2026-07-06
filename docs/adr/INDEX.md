@@ -10,3 +10,5 @@
 | [ADR-003](./ADR-003-health-gate-before-prune.md) | Health gate перед `docker image prune` | Accepted | 2026-06-19 |
 | [ADR-004](./ADR-004-ci-gating-before-deploy.md) | CI gating перед деплоем (дополняет ADR-002) | Accepted | 2026-06-19 |
 | [ADR-005](./ADR-005-coin-wallet-billing.md) | Единый кошелёк монет вместо мультивалютных кредитов | Accepted | 2026-07-01 |
+| [ADR-006](./ADR-006-preset-voices-catalog.md) | Каталог пресет-голосов (AI Voices) + превью профилей | Accepted | 2026-07-06 |
+| [ADR-007](./ADR-007-video-three-modes.md) | Видео-генерация на 3 режима (Avatar / Visual Clip / Lyrics Video) | Accepted | 2026-07-06 |

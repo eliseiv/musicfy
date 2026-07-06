@@ -47,6 +47,9 @@ class JobStage(str, Enum):
     # video
     source_prep = "source_prep"
     lipsync = "lipsync"
+    visual_gen = "visual_gen"
+    mux_audio = "mux_audio"
+    lyrics_render = "lyrics_render"
 
 
 class StageStatus(str, Enum):
@@ -153,6 +156,24 @@ class VideoMode(str, Enum):
     avatar_performance = "avatar_performance"
     visual_clip = "visual_clip"
     lyrics_video = "lyrics_video"
+
+
+class VideoStyle(str, Enum):
+    """Стиль видеоряда. Хранится строкой в Asset.meta (без отдельного PG-типа)."""
+
+    realistic = "realistic"
+    cartoon = "cartoon"
+    anime = "anime"
+    cinematic = "cinematic"
+
+
+class VideoAspect(str, Enum):
+    """Соотношение сторон. Значения совпадают с enum aspect_ratio моделей seedance."""
+
+    square = "1:1"
+    portrait_3_4 = "3:4"
+    landscape_4_3 = "4:3"
+    vertical_9_16 = "9:16"
 
 
 class ModerationStatus(str, Enum):

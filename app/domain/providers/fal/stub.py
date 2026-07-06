@@ -24,8 +24,16 @@ logger = logging.getLogger(__name__)
 class StubFalProvider:
     PROVIDER_NAME = "fal-stub"
 
-    def __init__(self, *, webhook_secret: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        webhook_secret: str = "",
+        video_lyrics_bg_model: str = "",
+    ) -> None:
         self._webhook_secret = webhook_secret
+        # Симметрия конструктора с FalAiProvider; стаб отдаёт синтетику, поэтому
+        # реальную модель не дёргает (submit-и игнорируют строки моделей).
+        self._video_lyrics_bg_model = video_lyrics_bg_model
 
     async def aclose(self) -> None:
         pass
@@ -95,6 +103,26 @@ class StubFalProvider:
         self, *, video_url, audio_url, webhook_url, idempotency_key
     ) -> FalSubmitResult:
         return self._submit("lipsync")
+
+    async def submit_avatar_image_video(
+        self, *, image_url, audio_url, webhook_url, idempotency_key
+    ) -> FalSubmitResult:
+        return self._submit("avatar-image")
+
+    async def submit_text_to_video(
+        self, *, prompt, aspect_ratio, webhook_url, idempotency_key
+    ) -> FalSubmitResult:
+        return self._submit("t2v")
+
+    async def submit_lyrics_background(
+        self, *, prompt, aspect_ratio, webhook_url, idempotency_key
+    ) -> FalSubmitResult:
+        return self._submit("lyrics-bg")
+
+    async def submit_image_to_video(
+        self, *, prompt, image_url, aspect_ratio, webhook_url, idempotency_key
+    ) -> FalSubmitResult:
+        return self._submit("i2v")
 
     async def upload_to_storage(self, *, content: bytes, filename: str, content_type: str) -> str:
         return f"https://fal-stub-cdn.local/{uuid.uuid4().hex}/{filename}"

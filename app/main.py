@@ -39,7 +39,10 @@ logger = logging.getLogger(__name__)
 def _default_fal_factory(settings: Settings):
     if settings.FAL_USE_STUB:
         logger.warning("FAL_USE_STUB=true — using in-process StubFalProvider (dev only)")
-        return StubFalProvider(webhook_secret=settings.FAL_WEBHOOK_SECRET.get_secret_value())
+        return StubFalProvider(
+            webhook_secret=settings.FAL_WEBHOOK_SECRET.get_secret_value(),
+            video_lyrics_bg_model=settings.FAL_VIDEO_LYRICS_BG_MODEL,
+        )
     key = settings.FAL_API_KEY.get_secret_value()
     if not key:
         logger.warning("FAL_API_KEY is not configured; generation endpoints will 503")
@@ -54,7 +57,11 @@ def _default_fal_factory(settings: Settings):
         lyrics_llm=settings.FAL_LYRICS_LLM,
         demucs_model=settings.FAL_DEMUCS_MODEL,
         voice_changer_model=settings.FAL_VOICE_CHANGER_MODEL,
-        video_model=settings.FAL_VIDEO_MODEL,
+        video_avatar_model=settings.FAL_VIDEO_AVATAR_MODEL,
+        video_avatar_image_model=settings.FAL_VIDEO_AVATAR_IMAGE_MODEL,
+        video_visual_model=settings.FAL_VIDEO_VISUAL_MODEL,
+        video_visual_image_model=settings.FAL_VIDEO_VISUAL_IMAGE_MODEL,
+        video_lyrics_bg_model=settings.FAL_VIDEO_LYRICS_BG_MODEL,
         webhook_secret=settings.FAL_WEBHOOK_SECRET.get_secret_value(),
         timeout_seconds=settings.FAL_HTTP_TIMEOUT_SECONDS,
     )

@@ -35,7 +35,10 @@ def _make_provider() -> FalAiProvider:
         lyrics_llm="fal-ai/llm",
         demucs_model="fal-ai/demucs",
         voice_changer_model="fal-ai/voice-changer",
-        video_model="fal-ai/video",
+        video_avatar_model="fal-ai/video",
+        video_avatar_image_model="fal-ai/video-image",
+        video_visual_model="fal-ai/t2v",
+        video_visual_image_model="fal-ai/i2v",
         webhook_secret="test-webhook-secret",
     )
 

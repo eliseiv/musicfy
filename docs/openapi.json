@@ -223,6 +223,31 @@
         }
       }
     },
+    "/v1/presets/voices": {
+      "get": {
+        "tags": [
+          "Пресеты"
+        ],
+        "summary": "Пресет-голоса (AI Voices)",
+        "operationId": "voices_v1_presets_voices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetVoiceView"
+                  },
+                  "type": "array",
+                  "title": "Response Voices V1 Presets Voices Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/lyrics": {
       "post": {
         "tags": [
@@ -607,6 +632,52 @@
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/Body_upload_source_video_v1_uploads_source_video_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/uploads/image": {
+      "post": {
+        "tags": [
+          "Загрузка"
+        ],
+        "summary": "Загрузить картинку-референс",
+        "operationId": "upload_image_v1_uploads_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_image_v1_uploads_image_post"
               }
             }
           },
@@ -1845,6 +1916,20 @@
         ],
         "title": "Body_upload_audio_v1_uploads_audio_post"
       },
+      "Body_upload_image_v1_uploads_image_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_image_v1_uploads_image_post"
+      },
       "Body_upload_source_video_v1_uploads_source_video_post": {
         "properties": {
           "file": {
@@ -2156,26 +2241,132 @@
       },
       "CreateVideoRequest": {
         "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/VideoMode",
+            "description": "Режим генерации видео."
+          },
           "audioUrl": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Audiourl",
-            "description": "URL аудио (трека)."
+            "description": "Прямой URL аудио (трека)."
+          },
+          "trackId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trackid",
+            "description": "«My track» — источник аудио (и лирики для lyrics_video)."
+          },
+          "variantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variantid",
+            "description": "Конкретный вариант трека (иначе — первый)."
           },
           "sourceVideoUrl": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Sourcevideourl",
-            "description": "URL исходного видео (из /v1/uploads/source-video)."
+            "description": "Исходное видео (avatar_performance) из /v1/uploads/source-video."
           },
-          "mode": {
-            "type": "string",
-            "maxLength": 32,
-            "title": "Mode",
-            "description": "Режим. В V1 — avatar_performance.",
-            "default": "avatar_performance"
+          "referenceImageUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceimageurl",
+            "description": "Референс-картинка из /v1/uploads/image."
+          },
+          "style": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoStyle"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Стиль: realistic/cartoon/anime/cinematic."
+          },
+          "aspectRatio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoAspect"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Соотношение сторон (default 9:16).",
+            "default": "9:16"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Сюжет/описание видеоряда."
+          },
+          "lyrics": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lyrics",
+            "description": "Явная лирика для lyrics_video (когда используется audioUrl без trackId)."
+          },
+          "surpriseMe": {
+            "type": "boolean",
+            "title": "Surpriseme",
+            "description": "Серверный подбор промпта из пресетов.",
+            "default": false
           },
           "title": {
             "anyOf": [
@@ -2192,15 +2383,16 @@
         },
         "type": "object",
         "required": [
-          "audioUrl",
-          "sourceVideoUrl"
+          "mode"
         ],
         "title": "CreateVideoRequest",
-        "description": "AI music video. `audioUrl` — готовый трек, `sourceVideoUrl` — аватар/исходное видео.",
+        "description": "AI music video на 3 режима (ADR-007).\n\nИсточник аудио — ровно один из `audioUrl` / `trackId`. Остальные обязательные\nполя зависят от `mode`:\n- `avatar_performance` — аватар: `sourceVideoUrl` **или** `referenceImageUrl`;\n- `visual_clip` — `prompt` **или** `surpriseMe`;\n- `lyrics_video` — лирика: поле `lyrics` **или** `trackId` (лирика из трека).",
         "example": {
+          "aspectRatio": "9:16",
           "audioUrl": "https://fal.media/files/.../song.mp3",
           "mode": "avatar_performance",
-          "sourceVideoUrl": "https://fal.media/files/.../avatar.mp4"
+          "sourceVideoUrl": "https://fal.media/files/.../avatar.mp4",
+          "style": "cinematic"
         }
       },
       "CreateVoiceRequest": {
@@ -2791,6 +2983,94 @@
         ],
         "title": "PresetView"
       },
+      "PresetVoiceView": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Стабильный ключ пресета (передаётся в cover.targetVoice)."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "previewUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previewurl",
+            "description": "URL превью-сэмпла (▶️)."
+          },
+          "sampleDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampledurationseconds",
+            "description": "Длительность превью в секундах."
+          },
+          "gender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gender"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "title"
+        ],
+        "title": "PresetVoiceView",
+        "description": "Публичное представление пресет-голоса (AI Voices).\n\nПровайдерский `provider_voice` намеренно исключён — наружу отдаётся только\nстабильный `key`."
+      },
       "PriceView": {
         "properties": {
           "jobType": {
@@ -3192,6 +3472,26 @@
         "title": "VerifyPurchaseRequest",
         "description": "Верификация покупки StoreKit 2."
       },
+      "VideoAspect": {
+        "type": "string",
+        "enum": [
+          "1:1",
+          "3:4",
+          "4:3",
+          "9:16"
+        ],
+        "title": "VideoAspect",
+        "description": "Соотношение сторон. Значения совпадают с enum aspect_ratio моделей seedance."
+      },
+      "VideoMode": {
+        "type": "string",
+        "enum": [
+          "avatar_performance",
+          "visual_clip",
+          "lyrics_video"
+        ],
+        "title": "VideoMode"
+      },
       "VideoResultResponse": {
         "properties": {
           "jobId": {
@@ -3215,6 +3515,42 @@
             "title": "Videourl",
             "description": "URL готового видео (если completed)."
           },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode",
+            "description": "Режим генерации (из Asset.meta)."
+          },
+          "aspectRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspectratio",
+            "description": "Соотношение сторон (из Asset.meta)."
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style",
+            "description": "Стиль (из Asset.meta)."
+          },
           "createdAt": {
             "anyOf": [
               {
@@ -3234,6 +3570,17 @@
           "status"
         ],
         "title": "VideoResultResponse"
+      },
+      "VideoStyle": {
+        "type": "string",
+        "enum": [
+          "realistic",
+          "cartoon",
+          "anime",
+          "cinematic"
+        ],
+        "title": "VideoStyle",
+        "description": "Стиль видеоряда. Хранится строкой в Asset.meta (без отдельного PG-типа)."
       },
       "VoiceProfileResponse": {
         "properties": {
@@ -3266,6 +3613,28 @@
               }
             ],
             "title": "Providervoiceid"
+          },
+          "previewUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previewurl"
+          },
+          "sampleDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampledurationseconds"
           },
           "jobId": {
             "anyOf": [

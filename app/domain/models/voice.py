@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     text,
@@ -69,4 +70,5 @@ class VoiceProfile(Base, TimestampMixin):
         PgUUID(as_uuid=True), ForeignKey("voice_consents.id", ondelete="SET NULL"), nullable=True
     )
     sample_asset_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sample_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

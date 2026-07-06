@@ -142,6 +142,43 @@ class FalProvider(Protocol):
         idempotency_key: str,
     ) -> FalSubmitResult: ...
 
+    async def submit_avatar_image_video(
+        self,
+        *,
+        image_url: str,
+        audio_url: str,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult: ...
+
+    async def submit_text_to_video(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult: ...
+
+    async def submit_lyrics_background(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult: ...
+
+    async def submit_image_to_video(
+        self,
+        *,
+        prompt: str,
+        image_url: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult: ...
+
     # ----- storage / webhooks / polling -----
     async def upload_to_storage(
         self,

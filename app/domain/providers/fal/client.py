@@ -52,7 +52,11 @@ class FalAiProvider:
         lyrics_llm: str,
         demucs_model: str,
         voice_changer_model: str,
-        video_model: str,
+        video_avatar_model: str,
+        video_avatar_image_model: str,
+        video_visual_model: str,
+        video_visual_image_model: str,
+        video_lyrics_bg_model: str = "bytedance/seedance-2.0/text-to-video",
         webhook_secret: str,
         timeout_seconds: float = 30.0,
     ) -> None:
@@ -67,7 +71,11 @@ class FalAiProvider:
         self._lyrics_llm = lyrics_llm
         self._demucs_model = demucs_model
         self._voice_changer_model = voice_changer_model
-        self._video_model = video_model
+        self._video_avatar_model = video_avatar_model
+        self._video_avatar_image_model = video_avatar_image_model
+        self._video_visual_model = video_visual_model
+        self._video_visual_image_model = video_visual_image_model
+        self._video_lyrics_bg_model = video_lyrics_bg_model
         self._webhook_secret = webhook_secret
         self._timeout = timeout_seconds
         self._fal_jwks: list[dict] = []
@@ -316,9 +324,91 @@ class FalAiProvider:
         webhook_url: str | None,
         idempotency_key: str,
     ) -> FalSubmitResult:
+        # kling lipsync (avatar + source video). Поля: video_url, audio_url.
         payload: dict[str, Any] = {"video_url": video_url, "audio_url": audio_url}
         return await self._submit(
-            model=self._video_model,
+            model=self._video_avatar_model,
+            payload=payload,
+            webhook_url=webhook_url,
+            idempotency_key=idempotency_key,
+        )
+
+    async def submit_avatar_image_video(
+        self,
+        *,
+        image_url: str,
+        audio_url: str,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        # sync-lipsync/v3/image-to-video: поля image_url, audio_url (оба обязательны,
+        # длительность выхода = длительность аудио). Иных полей модель не принимает.
+        payload: dict[str, Any] = {"image_url": image_url, "audio_url": audio_url}
+        return await self._submit(
+            model=self._video_avatar_image_model,
+            payload=payload,
+            webhook_url=webhook_url,
+            idempotency_key=idempotency_key,
+        )
+
+    async def submit_text_to_video(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        # seedance-2.0/text-to-video: обязателен prompt; aspect_ratio опционален
+        # (enum "1:1"/"3:4"/"4:3"/"9:16"/... — совпадает с VideoAspect). Прочих полей
+        # не шлём (fal 422 на лишних). None-поля отфильтрованы.
+        payload: dict[str, Any] = {"prompt": prompt}
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        return await self._submit(
+            model=self._video_visual_model,
+            payload=payload,
+            webhook_url=webhook_url,
+            idempotency_key=idempotency_key,
+        )
+
+    async def submit_lyrics_background(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        # lyrics_video (ADR-007 §3/§3a): t2v-фон под бёрн-ин лирики. Отдельный submit-метод
+        # (не submit_text_to_video), реально дёргающий FAL_VIDEO_LYRICS_BG_MODEL, чтобы
+        # инвариант job.provider_model == вызванной модели держался даже при
+        # FAL_VIDEO_LYRICS_BG_MODEL != FAL_VIDEO_VISUAL_MODEL. Схема запроса идентична t2v.
+        payload: dict[str, Any] = {"prompt": prompt}
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        return await self._submit(
+            model=self._video_lyrics_bg_model,
+            payload=payload,
+            webhook_url=webhook_url,
+            idempotency_key=idempotency_key,
+        )
+
+    async def submit_image_to_video(
+        self,
+        *,
+        prompt: str,
+        image_url: str,
+        aspect_ratio: str | None,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        # seedance-2.0/image-to-video: обязательны prompt + image_url; aspect_ratio опц.
+        payload: dict[str, Any] = {"prompt": prompt, "image_url": image_url}
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        return await self._submit(
+            model=self._video_visual_image_model,
             payload=payload,
             webhook_url=webhook_url,
             idempotency_key=idempotency_key,

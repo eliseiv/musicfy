@@ -75,7 +75,10 @@ async def create_voice(
         profile = await VoiceRepository(session).get_profile(profile_id)
         return VoiceProfileResponse(
             id=str(profile.id), name=profile.name, status=profile.status.value,
-            provider_voice_id=profile.provider_voice_id, job_id=str(result.job_id),
+            provider_voice_id=profile.provider_voice_id,
+            preview_url=profile.sample_asset_url,
+            sample_duration_seconds=profile.sample_duration_seconds,
+            job_id=str(result.job_id),
             created_at=profile.created_at,
         )
 
@@ -90,7 +93,10 @@ async def list_voices(
         return [
             VoiceProfileResponse(
                 id=str(p.id), name=p.name, status=p.status.value,
-                provider_voice_id=p.provider_voice_id, created_at=p.created_at,
+                provider_voice_id=p.provider_voice_id,
+                preview_url=p.sample_asset_url,
+                sample_duration_seconds=p.sample_duration_seconds,
+                created_at=p.created_at,
             )
             for p in profiles
         ]

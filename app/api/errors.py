@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -248,11 +249,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # jsonable_encoder normalises non-serialisable values in errors()
+        # (e.g. ctx={'error': ValueError(...)} from pydantic model_validator),
+        # so building JSONResponse can't raise TypeError -> real 400 INVALID_INPUT.
         return _envelope(
             code="INVALID_INPUT",
             message="Request validation failed",
             status_code=400,
-            details={"errors": exc.errors()},
+            details={"errors": jsonable_encoder(exc.errors())},
             request_id=request_id_var.get(),
         )
 

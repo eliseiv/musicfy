@@ -65,6 +65,7 @@ ignore = ["B008", "UP042"]
 # ffmpeg-хелпер работает с локальными temp-файлами (мелкие, в TemporaryDirectory);
 # probe_duration_seconds намеренно принимает timeout как часть публичного API.
 "app/domain/services/audio_mixer.py" = ["ASYNC230", "ASYNC240"]
+"app/domain/services/video_mux.py" = ["ASYNC230", "ASYNC240"]
 "app/domain/services/audio_duration.py" = ["ASYNC109"]
 # Документация API: длинные строки описаний/примеров в OpenAPI и схемах допустимы.
 "app/api/openapi.py" = ["E501"]

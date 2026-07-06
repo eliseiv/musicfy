@@ -26,6 +26,7 @@ from app.domain.models.lyrics_draft import LyricsDraft  # noqa: F401,E402
 
 # Фаза 7 (moderation / analytics):
 from app.domain.models.moderation import ModerationCase  # noqa: F401,E402
+from app.domain.models.preset_voice import PresetVoice  # noqa: F401,E402
 from app.domain.models.prompt_preset import PromptPreset  # noqa: F401,E402
 from app.domain.models.session import Session  # noqa: F401,E402
 from app.domain.models.track import Track, TrackVariant  # noqa: F401,E402

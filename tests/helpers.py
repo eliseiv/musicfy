@@ -17,6 +17,13 @@ async def provider_request_id(app, job_id: str) -> str:
         return job.provider_request_id
 
 
+async def job_input_payload(app, job_id: str) -> dict:
+    """Возвращает сохранённый input_payload джобы (для проверки резолва target_voice)."""
+    async with app.state.sessionmaker() as session:
+        job = await session.get(Job, _uuid.UUID(job_id))
+        return dict(job.input_payload or {})
+
+
 async def emit_fal_completed(
     client, request_id: str, *, media_url: str | None = None,
     duration: float | None = None, stems: dict | None = None,

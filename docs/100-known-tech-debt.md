@@ -8,6 +8,9 @@
 | [TD-001](#td-001) | Нет автоматического отката БД-миграций при rollback | medium | open |
 | [TD-002](#td-002) | Async-стадия без media_url помечается succeeded, опираясь на safety-net в _finalize | low | open |
 | [TD-003](#td-003) | fal error-конверт (status ERROR) отвергается как невалидный payload вместо маппинга job в failed | low | closed |
+| [TD-004](#td-004) | Lyrics Video V1 — равномерная синхронизация строк вместо форс-алайнмента | medium | open |
+| [TD-005](#td-005) | Нет background job runner для тяжёлых синхронных задач вне request-пути (статический фон lyrics_video отложен) | medium | open |
+| [TD-006](#td-006) | Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены — `preset_voices.preview_url` / `sample_duration_seconds` = NULL; ▶️ на вкладке AI Voices нефункционально | low | open |
 
 ---
 
@@ -86,3 +89,81 @@
   [ARCHITECTURE.md → Контракт интеграции fal.ai](./ARCHITECTURE.md#контракт-интеграции-falai-форматы-результата).
   Подтверждено backend-review (approve, 0 findings) и qa (33 passed, coverage `parsing.py` 90%;
   тесты `tests/test_fal_webhook_error_envelope.py`, `tests/test_fal_webhook_parse.py`).
+
+---
+
+## TD-004 — Lyrics Video V1: равномерная синхронизация строк вместо форс-алайнмента {#td-004}
+
+- **Контекст:** режим Lyrics Video (см. [ADR-007](./adr/ADR-007-video-three-modes.md), стадия
+  `lyrics_render` в `app/domain/services/pipelines/video.py` / `video_mux.py`) в V1 распределяет
+  строки лирики по длительности трека **равномерно** (`probe_duration_seconds` ÷ число строк),
+  генерируя `.ass`/`.srt` и бёрня их поверх фона через ffmpeg. Реального выравнивания текста по
+  вокалу (force alignment) нет. **Исполнение теперь async** (MAJOR-6, ADR-007 §3a): стадия
+  `lyrics_render` + мукс выполняются в `advance()` (фон webhook/поллера) поверх сгенерированного
+  fal t2v-фона, а **не** синхронно в `start()`/request-пути. Равномерность таймингов — по-прежнему
+  V1-ограничение (этот TD).
+- **Последствие:** тайминги строк смещаются относительно фактического пения — тем сильнее, чем
+  неравномернее вокал (проигрыши, растянутые/быстрые куски). Приемлемо для V1 lyrics-клипа, но
+  не «karaoke-точно».
+- **Митигация сейчас:** V1 сознательно равномерная; лирика берётся из
+  `Job.input_payload['_lyrics']` (song-пайплайн пишет `_lyrics` в `input_payload` задачи-песни,
+  `song.py:37,58`; в `Track.meta` его **нет** — там только `{"runtime": ...}`, `song.py:243`).
+  При `trackId` резолв идёт через `Track.job_id` → `Job` (обратный доступ track→job — задача
+  backend, см. [ADR-007](./adr/ADR-007-video-three-modes.md) §3/MAJOR-2); без трека — явное поле
+  `lyrics` запроса. Качество зависит от наличия текста.
+- **Возможное закрытие (V2):** отдельная стадия `align_lyrics` (`JobStage`, зарезервирован в
+  enum) с форс-алайнментом (whisperx / aeneas / STT) — генерирует точные тайминги строк/слов до
+  `lyrics_render`. Требует тяжёлой зависимости и доп. стоимости — отложено осознанно.
+
+---
+
+## TD-005 — Нет background job runner для тяжёлых синхронных задач вне request-пути {#td-005}
+
+- **Контекст:** `pipeline.start()` вызывается **инлайн** в `create_job` внутри HTTP-хендлера
+  `POST /v1/videos` (`generation_service.py:192` → `runner.py:53`). Единственный механизм
+  асинхронной фоновой обработки — стадии, продвигаемые `advance()` через webhook/`FalPoller` по
+  завершении **fal**-задачи. Собственного background job runner (worker + очередь) под тяжёлые
+  **не-fal** задачи (ffmpeg-рендер/мукс/upload на всю длину трека) в системе нет.
+- **Последствие:** режим, который хотел бы делать тяжёлую работу **без** fal-стадии (например,
+  Lyrics Video со статическим/градиентным фоном, ADR-007), не может — синхронное исполнение в
+  `start()` заблокировало бы request-путь (таймаут Traefik/uvicorn) и оставило бы job `running`
+  без `provider_request_id`, который `recover_orphan_jobs` пометит `failed` при рестарте
+  (`recovery.py:16`). Поэтому статический фон lyrics_video **отложен**, а V1 всегда использует
+  генеративный fal t2v-фон (async, симметрично visual_clip) — доп. стоимость и время генерации.
+- **Митигация сейчас:** все тяжёлые video-стадии привязаны к fal-submit → `advance()` (инвариант
+  ADR-007 §3a); `start()` во всех режимах быстрый (только fal-submit).
+- **Возможное закрытие:** ввести background job runner (напр. отдельный worker + очередь / таблица
+  задач с поллингом), чтобы `start()` мог поставить тяжёлую не-fal задачу в фон и сразу вернуть
+  `202`. Тогда статический/градиентный фон lyrics_video (без затрат на fal) станет возможен.
+
+---
+
+## TD-006 — Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены {#td-006}
+
+- **Контекст:** каталог пресет-голосов (AI Voices) заведён миграцией `0012_preset_voices`
+  (8 голосов: Aria / Max / Luna / Kai / Nova / Leo / Sage / Rex), где `preview_url` и
+  `sample_duration_seconds` сознательно засеяны `NULL` (см.
+  [ADR-006](./adr/ADR-006-preset-voices-catalog.md) §4). По ADR-006 §4/§6 превью заполняются
+  **отдельной оффлайн-бэкфилл-миграцией** (`UPDATE preset_voices SET preview_url /
+  sample_duration_seconds ...`). Эта миграция **не создана**: изначально в ADR за ней был
+  зарезервирован номер `0013`, но слот занят Feature B (`0013_video_stages`, ADR-007). Голова
+  цепочки миграций сейчас — `0013_video_stages`; свободный слот под бэкфилл — следующий
+  (напр. `0014_seed_preset_voice_previews`).
+- **Последствие:** все 8 пресет-голосов уходят в прод с `preview_url = NULL` → кнопка ▶️
+  превью на вкладке AI Voices (экран Create Cover) **нефункциональна** до бэкфилла.
+- **Серьёзность — low/medium:** функциональной потери в основном флоу нет. Каталог, имена,
+  метаданные (`gender` / `style` / `subtitle`), выбор и резолв голоса (`cover.targetVoice` →
+  `provider_voice`) работают; эндпоинт `GET /v1/presets/voices` и iOS-клиент терпят `null`
+  `previewUrl` (▶️ просто неактивна). Превью на вкладке My Clones работает независимо — оно
+  берётся из `voice_profiles.sample_asset_url`, а не из пресет-ветки. Пробел ограничен
+  превью-сэмплами пресетов.
+- **Митигация сейчас:** сид каталога (`0012`) и генерация превью разнесены и не блокируют друг
+  друга (ADR-006 §4); рантайм production-ready — все NULL-пути обрабатываются gracefully на
+  бэкенде и клиенте.
+- **План закрытия:** одноразовая оффлайн-генерация превью — эталонный вокал-клип прогоняется
+  через fal voice-changer по каждому `provider_voice` (`upload_to_storage` +
+  `submit_voice_changer` + `probe_duration_seconds`), результат перезаливается в fal storage,
+  пары `(key → preview_url, sample_duration_seconds)` вписываются в новую бэкфилл-миграцию
+  `0014_seed_preset_voice_previews` (следующий свободный слот после `0013_video_stages`).
+  Альтернатива — curated-mp3 с ручной подготовкой URL. См.
+  [ADR-006](./adr/ADR-006-preset-voices-catalog.md) §4/§6.

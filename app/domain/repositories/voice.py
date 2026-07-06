@@ -59,6 +59,7 @@ class VoiceRepository:
     async def update_profile(
         self, *, profile_id: UUID, provider_voice_id: str | None,
         status: VoiceProfileStatus, meta: dict[str, Any] | None = None,
+        sample_duration_seconds: int | None = None,
     ) -> None:
         profile = await self._session.get(VoiceProfile, profile_id)
         if profile is not None:
@@ -66,6 +67,8 @@ class VoiceRepository:
             profile.status = status
             if meta is not None:
                 profile.meta = meta
+            if sample_duration_seconds is not None:
+                profile.sample_duration_seconds = sample_duration_seconds
 
     async def list_profiles(self, user_id: UUID) -> list[VoiceProfile]:
         stmt = (
