@@ -144,9 +144,10 @@ app/
   иначе `ValidationFailed(reason="unknown_voice")` (422). **Инвариант:** при совпадении с ключом
   пресета `payload["target_voice"]` переписывается на резолвнутое `provider_voice` **до** сохранения
   job — в fal уходит провайдерское значение, наружу клиент оперирует только `key`.
-- **Превью** заполняются оффлайн (отдельная бэкфилл-миграция следующим свободным номером, напр.
-  `0014_seed_preset_voice_previews`; **ещё не создана, отложена** → [TD-006](./100-known-tech-debt.md#td-006)),
-  не в request-флоу: `NULL` в `preview_url` допустим (▶️ пресетов неактивна до бэкфилла). Профиль
+- **Превью** заполнены оффлайн (бэкфилл-миграция `0014_seed_preset_voice_previews`,
+  `down_revision="0013_video_stages"` — реальные fal voice-changer URL для 8 пресетов,
+  выполнена → [TD-006 (closed)](./100-known-tech-debt.md#td-006)), не в request-флоу: схема терпит
+  `NULL` в `preview_url` (для новых пресетов до бэкфилла ▶️ неактивна). Профиль
   клона (`VoiceProfileResponse`) отдаёт `previewUrl`
   (из `voice_profiles.sample_asset_url`) и `sampleDurationSeconds` (новая колонка, best-effort
   `probe_duration_seconds`).

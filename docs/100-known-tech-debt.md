@@ -10,7 +10,7 @@
 | [TD-003](#td-003) | fal error-конверт (status ERROR) отвергается как невалидный payload вместо маппинга job в failed | low | closed |
 | [TD-004](#td-004) | Lyrics Video V1 — равномерная синхронизация строк вместо форс-алайнмента | medium | open |
 | [TD-005](#td-005) | Нет background job runner для тяжёлых синхронных задач вне request-пути (статический фон lyrics_video отложен) | medium | open |
-| [TD-006](#td-006) | Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены — `preset_voices.preview_url` / `sample_duration_seconds` = NULL; ▶️ на вкладке AI Voices нефункционально | low | open |
+| [TD-006](#td-006) | Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены — `preset_voices.preview_url` / `sample_duration_seconds` = NULL; ▶️ на вкладке AI Voices нефункционально | low | closed |
 
 ---
 
@@ -140,7 +140,17 @@
 
 ## TD-006 — Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены {#td-006}
 
-- **Контекст:** каталог пресет-голосов (AI Voices) заведён миграцией `0012_preset_voices`
+> **Статус: closed.** Превью-сэмплы для всех 8 пресет-голосов сгенерированы реальным fal
+> voice-changer (эталонный вокал-клип → `fal-ai/elevenlabs/voice-changer` по каждому
+> `provider_voice`, queue submit → poll result) и забэкфилены миграцией
+> `0014_seed_preset_voice_previews` (`down_revision="0013_video_stages"`, голова цепочки теперь
+> `0014`). `UPDATE preset_voices SET preview_url / sample_duration_seconds` для 8 ключей
+> (aria / max / luna / kai / nova / leo / sage / rex); `downgrade` обнуляет обратно в NULL.
+> Все 8 URL проверены (HTTP 200, `content-type audio/mpeg`, ~5с), round-trip alembic up/down
+> пройден. Контракт превью — [ADR-006](./adr/ADR-006-preset-voices-catalog.md) §4/§6. Закрытие
+> подтверждено.
+
+- **Контекст (исходная проблема):** каталог пресет-голосов (AI Voices) заведён миграцией `0012_preset_voices`
   (8 голосов: Aria / Max / Luna / Kai / Nova / Leo / Sage / Rex), где `preview_url` и
   `sample_duration_seconds` сознательно засеяны `NULL` (см.
   [ADR-006](./adr/ADR-006-preset-voices-catalog.md) §4). По ADR-006 §4/§6 превью заполняются
@@ -160,10 +170,14 @@
 - **Митигация сейчас:** сид каталога (`0012`) и генерация превью разнесены и не блокируют друг
   друга (ADR-006 §4); рантайм production-ready — все NULL-пути обрабатываются gracefully на
   бэкенде и клиенте.
-- **План закрытия:** одноразовая оффлайн-генерация превью — эталонный вокал-клип прогоняется
-  через fal voice-changer по каждому `provider_voice` (`upload_to_storage` +
-  `submit_voice_changer` + `probe_duration_seconds`), результат перезаливается в fal storage,
-  пары `(key → preview_url, sample_duration_seconds)` вписываются в новую бэкфилл-миграцию
-  `0014_seed_preset_voice_previews` (следующий свободный слот после `0013_video_stages`).
-  Альтернатива — curated-mp3 с ручной подготовкой URL. См.
+- **Закрыто:** одноразовая оффлайн-генерация превью выполнена — эталонный вокал-клип (сгенерирован
+  через `FAL_SPEECH_MODEL`) прогнан через fal voice-changer (`FAL_VOICE_CHANGER_MODEL =
+  fal-ai/elevenlabs/voice-changer`) по каждому `provider_voice` реальным queue-вызовом
+  (submit → poll result по `request_id`); durable-URL результата (`v3b.fal.media`) используются
+  напрямую. Пары `(key → preview_url, sample_duration_seconds)` забэкфилены миграцией
+  `0014_seed_preset_voice_previews` (`down_revision="0013_video_stages"`; `upgrade` —
+  `UPDATE preset_voices SET preview_url = :url, sample_duration_seconds = :dur WHERE key = :key`
+  для 8 ключей; `downgrade` — обнуление в NULL). Голова цепочки миграций теперь `0014`. Все 8 URL
+  проверены (HTTP 200, `audio/mpeg`, ~5с), alembic round-trip up/down пройден. Сид каталога
+  (`0012`, NULL) и бэкфилл (`0014`, реальные URL) разнесены и не блокируют друг друга. Контракт —
   [ADR-006](./adr/ADR-006-preset-voices-catalog.md) §4/§6.

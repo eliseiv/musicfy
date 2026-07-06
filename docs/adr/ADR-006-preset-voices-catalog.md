@@ -105,12 +105,16 @@ voice-changer по каждому `provider_voice` (существующие `up
 `TrackVariant.audio_url`). Эндпоинт терпит `NULL` в `preview_url` (до бэкфилла ▶️ просто
 неактивна) — сид каталога (`0012`) и генерация превью разнесены и не блокируют друг друга.
 
-> **Факт на дату ревизии:** бэкфилл-миграция ещё **не создана** и отложена. Изначально за ней
-> резервировался номер `0013`, но этот слот занят Feature B (`0013_video_stages`, ADR-007) —
-> голова цепочки миграций сейчас `0013_video_stages`. Бэкфилл выполняется **следующим
-> свободным номером** (напр. `0014_seed_preset_voice_previews`). Пока не создан → все пресет-
-> голоса живут с `preview_url = NULL`, ▶️ на вкладке AI Voices неактивна. Отложенная работа
-> зафиксирована как [TD-006](../100-known-tech-debt.md#td-006).
+> **Факт (обновлено 2026-07-06):** бэкфилл-миграция **создана и выполнена** —
+> `0014_seed_preset_voice_previews` (`down_revision="0013_video_stages"`, голова цепочки теперь
+> `0014`). Изначально за бэкфиллом резервировался номер `0013`, но слот занят Feature B
+> (`0013_video_stages`, ADR-007), поэтому использован следующий свободный `0014`. Превью-сэмплы
+> для всех 8 пресет-голосов сгенерированы реальным fal voice-changer (эталонный вокал-клип →
+> `fal-ai/elevenlabs/voice-changer` по каждому `provider_voice`, queue submit → poll result);
+> `upgrade` выполняет `UPDATE preset_voices SET preview_url / sample_duration_seconds` для 8
+> ключей, `downgrade` обнуляет обратно в NULL. Все 8 URL проверены (HTTP 200, `audio/mpeg`),
+> alembic round-trip up/down пройден — ▶️ на вкладке AI Voices функциональна. Закрытие
+> зафиксировано как [TD-006 (closed)](../100-known-tech-debt.md#td-006).
 
 ### 5. Превью в профиле клона (My Clones)
 
@@ -125,10 +129,12 @@ voice-changer по каждому `provider_voice` (существующие `up
 - **`0012_preset_voices`** (`down_revision="0011_reseed_coin_products"`): `create_table`
   `preset_voices` + seed стартового каталога (`preview_url` / `sample_duration_seconds` = NULL)
   + `op.add_column("voice_profiles", sample_duration_seconds)`. **Реализована.**
-- **Бэкфилл превью-сэмплов** — **отдельная будущая миграция** следующим свободным номером (напр.
-  `0014_seed_preset_voice_previews`, т.к. слот `0013` занят `0013_video_stages` из ADR-007):
-  `UPDATE preset_voices SET preview_url / sample_duration_seconds`. **Ещё не создана, отложена**
-  → [TD-006](../100-known-tech-debt.md#td-006).
+- **`0014_seed_preset_voice_previews`** (`down_revision="0013_video_stages"`) — бэкфилл
+  превью-сэмплов: `UPDATE preset_voices SET preview_url / sample_duration_seconds` для 8 ключей
+  (aria / max / luna / kai / nova / leo / sage / rex), `downgrade` обнуляет в NULL. Номер `0014`,
+  т.к. слот `0013` занят `0013_video_stages` из ADR-007. URL — реальные fal-результаты voice-changer
+  (проверены HTTP 200, `audio/mpeg`). **Реализована и выполнена** (голова цепочки теперь `0014`) →
+  [TD-006 (closed)](../100-known-tech-debt.md#td-006).
 
 Стартовый seed (`language="en"`, `sort_order` по порядку, `preview_url` / `sample_duration`
 = NULL на шаге `0012`): Aria (pop, female), Max (rnb, male), Luna (indie, female),
@@ -147,9 +153,9 @@ Rex (cinematic, male).
 - (−) **Ломающее изменение контракта `cover.targetVoice`:** ранее принималось любое значение,
   теперь — только пустое / UUID своего `ready`-клона / активный `key` пресета. Клиенты,
   славшие произвольные строки, получат 422. Допустимо: интеграция iOS не завершена.
-- (−) Двухшаговый сид (каталог `0012` → отдельная бэкфилл-миграция превью): между шагами ▶️
-  пресетов недоступна. Осознанно — сид не блокируется генерацией превью. Бэкфилл-миграция пока
-  **не создана** → [TD-006](../100-known-tech-debt.md#td-006).
+- (−) Двухшаговый сид (каталог `0012`, NULL → бэкфилл-миграция превью `0014`): между шагами ▶️
+  пресетов недоступна. Осознанно — сид не блокируется генерацией превью. Бэкфилл выполнен
+  миграцией `0014_seed_preset_voice_previews` → [TD-006 (closed)](../100-known-tech-debt.md#td-006).
 - (−) `VoiceProfileResponse` расширяется (аддитивно, не ломающе) — старые клиенты игнорируют
   новые поля.
 - (−/[RISK-A1]) Реальные `provider_voice` (voice-id ElevenLabs voice-changer) на шаге сида —
