@@ -18,6 +18,7 @@ class LibraryItem(CamelModel):
     id: str
     type: str
     title: str | None = None
+    prompt: str | None = None
     url: str | None = None
     created_at: str
 
@@ -50,6 +51,7 @@ async def library(
             tracks=[
                 LibraryItem(
                     id=str(t.id), type=t.kind.value, title=t.title,
+                    prompt=(t.meta or {}).get("prompt"),
                     created_at=t.created_at.isoformat(),
                 )
                 for t in tracks

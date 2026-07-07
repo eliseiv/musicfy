@@ -33,6 +33,43 @@ _STATUS_ALIASES = {
 # Максимальная длина error_message после компактной сериализации fallback-источников.
 _ERROR_MESSAGE_MAX_LEN = 500
 
+# Известный словарь имён стемов (demucs + другие сепараторы).
+STEM_NAMES = {
+    "vocals",
+    "vocal",
+    "drums",
+    "bass",
+    "other",
+    "guitar",
+    "piano",
+    "accompaniment",
+    "instrumental",
+    "backing",
+}
+
+
+def extract_stems(result: dict) -> dict | None:
+    """Извлекает стемы из результата fal-сепаратора.
+
+    Приоритет — явная обёртка ``result["stems"]`` (wrapped-модели, обратная
+    совместимость). Иначе demucs-путь: собрать верхнеуровневые ключи из
+    ``STEM_NAMES``, у которых значение даёт url (``{"url": ..}`` или строка).
+    Порог ``>=2`` защищает от коллизии одиночного stem-именованного ключа
+    у не-сепараторных моделей; demucs всегда отдаёт 4-6 стемов.
+    """
+    # 1) Приоритет — явная обёртка "stems".
+    explicit = result.get("stems")
+    if isinstance(explicit, dict) and explicit:
+        return explicit
+    # 2) demucs-путь: собрать верхнеуровневые ключи из известного словаря.
+    top: dict = {}
+    for k, v in result.items():
+        url = v.get("url") if isinstance(v, dict) else (v if isinstance(v, str) else None)
+        if k in STEM_NAMES and url:
+            top[k] = v  # сохраняем исходную форму — _pick_stem ест и {url:..}, и строку
+    # 3) Порог >=2 отсекает ложное срабатывание на одиночном ключе-омониме.
+    return top if len(top) >= 2 else None
+
 
 def extract_media(obj: Any) -> tuple[str | None, float | None]:
     """Достаёт media-url и длительность из разных форматов ответа fal."""
@@ -130,7 +167,7 @@ def parse_fal_webhook_event(raw_body: bytes) -> FalWebhookEvent:
         if not isinstance(result, dict):
             result = {}
         media_url, duration_seconds = extract_media(result)
-        stems = result.get("stems") if isinstance(result.get("stems"), dict) else None
+        stems = extract_stems(result)
         # Для не-failed статусов сохраняем прежнее поведение: верхнеуровневый error/error_message.
         raw_err = data.get("error") or data.get("error_message")
         error_message = str(raw_err) if raw_err else None

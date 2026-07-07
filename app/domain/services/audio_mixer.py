@@ -68,6 +68,82 @@ async def mix_music_and_vocal(
         return url, duration
 
 
+async def build_instrumental(
+    stem_urls: list[str],
+    upload_fn,
+) -> tuple[str | None, float | None]:
+    """Сводит N не-вокальных стемов в один инструментал через ffmpeg ``amix``.
+
+    Скачивает все стемы, микширует (``amix inputs=N:normalize=0``), загружает
+    результат через ``upload_fn`` и возвращает ``(url, duration)``. При ЛЮБОМ
+    сбое (нет ffmpeg / скачивание / amix / пустой файл / upload) возвращает
+    ``(None, None)`` — caller трактует это как «нет инструментала».
+    """
+    if not stem_urls:
+        return None, None
+    if not ffmpeg_available():
+        logger.warning("ffmpeg not in PATH — skipping build_instrumental")
+        return None, None
+    with tempfile.TemporaryDirectory(prefix="instr-") as tmp:
+        stem_paths: list[str] = []
+        try:
+            for idx, url in enumerate(stem_urls):
+                path = os.path.join(tmp, f"stem{idx}.input")
+                await _download(url, path)
+                stem_paths.append(path)
+        except Exception as e:
+            logger.warning("build_instrumental download failed: %s", e)
+            return None, None
+        output_path = os.path.join(tmp, "instrumental.wav")
+        try:
+            await _ffmpeg_amix(stem_paths, output_path)
+        except Exception as e:
+            logger.warning("build_instrumental amix failed: %s", e)
+            return None, None
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            logger.warning("build_instrumental produced empty file")
+            return None, None
+        try:
+            duration = await _probe_duration(output_path)
+        except Exception:
+            duration = None
+        try:
+            with open(output_path, "rb") as f:
+                content = f.read()
+            url = await upload_fn(
+                content=content, filename="instrumental.wav", content_type="audio/wav"
+            )
+        except Exception as e:
+            logger.warning("build_instrumental upload failed: %s", e)
+            return None, None
+        return url, duration
+
+
+async def _ffmpeg_amix(input_paths: list[str], output_path: str) -> None:
+    cmd: list[str] = ["ffmpeg", "-y"]
+    for path in input_paths:
+        cmd += ["-i", path]
+    n = len(input_paths)
+    labels = "".join(f"[{i}:a]" for i in range(n))
+    cmd += [
+        "-filter_complex",
+        f"{labels}amix=inputs={n}:duration=longest:normalize=0[a]",
+        "-map", "[a]",
+        "-ac", "2",
+        "-ar", "44100",
+        output_path,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg amix exit={proc.returncode}: "
+            f"{stderr.decode('utf-8', errors='replace')[:500]}"
+        )
+
+
 async def _download(url: str, dest_path: str) -> None:
     async with httpx.AsyncClient(timeout=60.0) as client:
         async with client.stream("GET", url) as resp:

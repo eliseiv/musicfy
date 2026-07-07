@@ -11,6 +11,7 @@ from app.domain.repositories.jobs import JobsRepository
 from app.domain.repositories.tracks import TracksRepository
 from app.domain.services.audio_duration import probe_duration_seconds
 from app.domain.services.pipelines.base import BasePipeline
+from app.domain.services.track_title import derive_track_title
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +73,10 @@ class CoverPipeline(BasePipeline):
 
         if completed_stage == JobStage.stem_separation:
             vocal_url = _pick_stem(stems, ("vocals", "vocal"))
-            instrumental = _pick_stem(
-                stems, ("accompaniment", "instrumental", "other", "backing")
-            )
+            instrumental_stems = _collect_instrumental_urls(stems)
             await self._update_payload(
                 job.id,
-                {"_vocal_stem": vocal_url, "_instrumental_stem": instrumental},
+                {"_vocal_stem": vocal_url, "_instrumental_stems": instrumental_stems},
             )
             if not vocal_url:
                 await self._record_stage(job.id, JobStage.voice_conversion, "skipped")
@@ -124,10 +123,10 @@ class CoverPipeline(BasePipeline):
         job = await self.load_job(job_id)
         payload = (job.input_payload if job else {}) or {}
         converted_vocal = runtime.get(JobStage.voice_conversion.value, {}).get("media_url")
-        instrumental = payload.get("_instrumental_stem") or payload.get("source_audio_url")
+        instrumental_stems = payload.get("_instrumental_stems") or []
 
         audio_url, duration, stems = await self._mix(
-            job_id, converted_vocal, instrumental, runtime
+            job_id, converted_vocal, instrumental_stems, runtime
         )
         await self._record_stage(job_id, JobStage.upload_cdn, "succeeded")
 
@@ -153,8 +152,12 @@ class CoverPipeline(BasePipeline):
                 if await tracks.get_by_job_id(job_id) is None:
                     track = await tracks.create(
                         user_id=job.user_id, job_id=job_id, kind=TrackKind.cover,
-                        title=(job.input_payload or {}).get("title"),
-                        meta={"runtime": runtime, "quality_flag": "mvp_review"},
+                        title=derive_track_title("cover", job.input_payload),
+                        meta={
+                            "runtime": runtime,
+                            "quality_flag": "mvp_review",
+                            "prompt": None,
+                        },
                     )
                     await tracks.add_variant(
                         track_id=track.id, variant_index=0, audio_url=audio_url,
@@ -167,15 +170,25 @@ class CoverPipeline(BasePipeline):
         await self._record_stage(job_id, JobStage.finalize, "succeeded")
 
     async def _mix(
-        self, job_id: UUID, vocal_url: str | None, instrumental_url: str | None,
+        self, job_id: UUID, vocal_url: str | None, instrumental_stems: list[str],
         runtime: dict[str, Any],
     ) -> tuple[str | None, float | None, dict[str, Any] | None]:
-        from app.domain.services.audio_mixer import ffmpeg_available, mix_music_and_vocal
+        from app.domain.services.audio_mixer import (
+            build_instrumental,
+            ffmpeg_available,
+            mix_music_and_vocal,
+        )
 
         if not vocal_url:
             return None, None, None
+        # Свести не-вокальные стемы в один инструментал (при ЛЮБОМ сбое → None).
+        instrumental_url: str | None = None
+        if instrumental_stems and ffmpeg_available():
+            instrumental_url, _ = await build_instrumental(
+                instrumental_stems, self._fal.upload_to_storage
+            )
         if not instrumental_url or not ffmpeg_available():
-            # Деградированный путь: отдаём преобразованный вокал, инструментал в stems.
+            # Деградированный путь: отдаём чистый преобразованный вокал.
             await self._record_stage(
                 job_id, JobStage.mix_master, "skipped", error="no instrumental or ffmpeg"
             )
@@ -196,6 +209,21 @@ class CoverPipeline(BasePipeline):
             return vocal_url, None, {"vocal": vocal_url, "instrumental": instrumental_url}
         await self._record_stage(job_id, JobStage.mix_master, "succeeded")
         return mix_url, mix_duration, {"vocal": vocal_url, "instrumental": instrumental_url}
+
+
+def _collect_instrumental_urls(stems: dict[str, Any] | None) -> list[str]:
+    """Собирает url всех не-вокальных стемов (для свода в инструментал)."""
+    if not stems:
+        return []
+    urls: list[str] = []
+    for k, v in stems.items():
+        if k in ("vocals", "vocal"):
+            continue
+        if isinstance(v, str) and v:
+            urls.append(v)
+        elif isinstance(v, dict) and v.get("url"):
+            urls.append(v["url"])
+    return urls
 
 
 def _pick_stem(stems: dict[str, Any] | None, keys: tuple[str, ...]) -> str | None:

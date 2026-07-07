@@ -50,6 +50,31 @@ async def emit_fal_completed(
     )
 
 
+async def emit_fal_demucs_completed(
+    client, request_id: str, *, stems: dict[str, str],
+):
+    """Эмулирует РЕАЛЬНЫЙ demucs-конверт fal: стемы верхнеуровневыми ключами payload.
+
+    fal demucs НЕ оборачивает результат в ``payload["stems"]`` — он кладёт каждый
+    стем отдельным верхнеуровневым ключом: ``{"vocals":{"url":..},"drums":{"url":..},
+    "bass":{"url":..},"other":{"url":..}}``. Именно этот формат разбирает
+    ``extract_stems`` (demucs-путь, порог >=2). Старый код читал только
+    ``result["stems"]`` и на этом формате вернул бы stems=None (регресс ADR-008).
+
+    ``stems`` — маппинг имя_стема → url; кладём как ``{name: {"url": url}}``.
+    """
+    payload = {name: {"url": url} for name, url in stems.items()}
+    body = json.dumps(
+        {"request_id": request_id, "status": "OK", "payload": payload, "error": None}
+    ).encode("utf-8")
+    sig = compute_signature(WEBHOOK_SECRET, body)
+    return await client.post(
+        "/v1/webhooks/fal",
+        content=body,
+        headers={"X-Fal-Signature": sig, "Content-Type": "application/json"},
+    )
+
+
 async def emit_fal_error(client, request_id: str, *, error: str = "model inference failed"):
     # Реальный fal queue ERROR-конверт (TD-003): {request_id,status:"ERROR",error,payload}.
     # Парсер маппит ERROR → failed; webhook-route переводит job в failed и делает refund.

@@ -2799,6 +2799,17 @@
             ],
             "title": "Title"
           },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
           "url": {
             "anyOf": [
               {
@@ -3325,6 +3336,17 @@
               }
             ],
             "title": "Title"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
           },
           "jobId": {
             "anyOf": [

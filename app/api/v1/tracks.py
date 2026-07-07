@@ -30,6 +30,7 @@ async def get_track(
             id=str(track.id),
             kind=track.kind.value,
             title=track.title,
+            prompt=(track.meta or {}).get("prompt"),
             job_id=str(track.job_id) if track.job_id else None,
             created_at=track.created_at,
             variants=[

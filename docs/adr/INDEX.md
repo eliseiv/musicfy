@@ -12,3 +12,4 @@
 | [ADR-005](./ADR-005-coin-wallet-billing.md) | Единый кошелёк монет вместо мультивалютных кредитов | Accepted | 2026-07-01 |
 | [ADR-006](./ADR-006-preset-voices-catalog.md) | Каталог пресет-голосов (AI Voices) + превью профилей | Accepted | 2026-07-06 |
 | [ADR-007](./ADR-007-video-three-modes.md) | Видео-генерация на 3 режима (Avatar / Visual Clip / Lyrics Video) | Accepted | 2026-07-06 |
+| [ADR-008](./ADR-008-demucs-stems-and-track-metadata.md) | Разбор demucs-стемов (верхнеуровневые ключи) + метаданные трека (промпт + автозаголовок) | Accepted | 2026-07-07 |

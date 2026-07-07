@@ -5,10 +5,17 @@ import pytest
 from tests.helpers import (
     auth_headers,
     emit_fal_completed,
+    emit_fal_demucs_completed,
     grant_weekly_subscription,
     job_input_payload,
     provider_request_id,
 )
+
+
+async def _coins_available(client, headers) -> int:
+    r = await client.get("/v1/billing/balance", headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()["coinsAvailable"]
 
 
 async def _create_ready_profile(client, headers) -> dict:
@@ -36,9 +43,14 @@ async def _create_ready_profile(client, headers) -> dict:
 
 @pytest.mark.asyncio
 async def test_cover_happy_path_e2e(client, app):
-    """Полный e2e кавера по существующему пути (без targetVoice / None)."""
+    """Полный e2e кавера. РЕГРЕСС ADR-008: demucs отдаёт стемы РЕАЛЬНЫМ форматом —
+    верхнеуровневыми ключами payload (vocals/drums/bass/other), без обёртки
+    ``result["stems"]``. Старый парсер вернул бы stems=None → voice_conversion
+    skipped → «no cover audio» (failed). Новый ``extract_stems`` (demucs-путь)
+    собирает стемы → cover доходит до completed."""
     headers = await auth_headers(client)
     await grant_weekly_subscription(client, headers)
+    coins_before = await _coins_available(client, headers)
 
     # 1. создаём cover без targetVoice — существующий путь резолва (None → без изменений)
     resp = await client.post(
@@ -53,31 +65,124 @@ async def test_cover_happy_path_e2e(client, app):
     assert status["status"] == "running"
     assert status["currentStage"] == "stem_separation"
 
-    # 2. demucs завершён — возвращает стемы
+    # 2. demucs завершён — стемы РЕАЛЬНЫМ форматом (top-level ключи, без "stems")
     rid = await provider_request_id(app, job_id)
-    wh1 = await emit_fal_completed(
+    wh1 = await emit_fal_demucs_completed(
         client, rid,
-        stems={"vocals": "https://cdn.local/vocals.wav", "accompaniment": "https://cdn.local/inst.wav"},
+        stems={
+            "vocals": "https://cdn.local/vocals.wav",
+            "drums": "https://cdn.local/drums.wav",
+            "bass": "https://cdn.local/bass.wav",
+            "other": "https://cdn.local/other.wav",
+        },
     )
     assert wh1.json()["status"] == "ok"
 
-    # 3. теперь стадия voice_conversion
+    # 3. стемы распознаны (extract_stems demucs-путь) → перешли к voice_conversion
     mid = (await client.get(f"/v1/jobs/{job_id}", headers=headers)).json()
-    assert mid["currentStage"] == "voice_conversion"
+    assert mid["currentStage"] == "voice_conversion", mid
 
-    # 4. voice-changer завершён
+    # 4. voice-changer завершён — converted vocal
     rid2 = await provider_request_id(app, job_id)
     wh2 = await emit_fal_completed(
         client, rid2, media_url="https://cdn.local/converted_vocal.wav", duration=30.0
     )
     assert wh2.json()["status"] == "ok"
 
-    # 5. cover готов
+    # 5. cover готов (без ffmpeg в CI — деградация до чистого converted vocal)
     final = (await client.get(f"/v1/jobs/{job_id}", headers=headers)).json()
     assert final["status"] == "completed", final
     track = (await client.get(f"/v1/tracks/{final['trackId']}", headers=headers)).json()
     assert track["kind"] == "cover"
-    assert track["variants"][0]["audioUrl"]
+    audio_url = track["variants"][0]["audioUrl"]
+    assert audio_url
+    # Анти-double-vocal: результат — converted vocal, НЕ source_audio_url (fallback убран).
+    assert audio_url == "https://cdn.local/converted_vocal.wav", audio_url
+    assert audio_url != "https://cdn.local/input.mp3"
+    # cover-трек: prompt отсутствует (meta['prompt'] = None).
+    assert track["prompt"] is None, track
+    # Монеты списаны (capture) на цену cover (5).
+    coins_after = await _coins_available(client, headers)
+    assert coins_after == coins_before - 5, (coins_before, coins_after)
+
+
+@pytest.mark.asyncio
+async def test_cover_no_vocal_stem_fails_and_releases_coins(client, app):
+    """demucs без вокального стема → voice_conversion skipped → converted_vocal
+    отсутствует → «no cover audio» (failed). Зарезервированные монеты возвращаются
+    (release), баланс восстанавливается."""
+    headers = await auth_headers(client)
+    await grant_weekly_subscription(client, headers)
+    coins_before = await _coins_available(client, headers)
+
+    resp = await client.post(
+        "/v1/covers",
+        json={"source_audio_url": "https://cdn.local/input.mp3"},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["jobId"]
+
+    # demucs вернул только не-вокальные стемы (>=2 ключа, но без vocals/vocal).
+    rid = await provider_request_id(app, job_id)
+    wh1 = await emit_fal_demucs_completed(
+        client, rid,
+        stems={
+            "drums": "https://cdn.local/drums.wav",
+            "bass": "https://cdn.local/bass.wav",
+            "other": "https://cdn.local/other.wav",
+        },
+    )
+    assert wh1.json()["status"] == "ok"
+
+    final = (await client.get(f"/v1/jobs/{job_id}", headers=headers)).json()
+    assert final["status"] == "failed", final
+    assert final["errorMessage"] == "no cover audio", final
+    assert final["trackId"] is None
+    # Монеты возвращены — баланс как до генерации.
+    coins_after = await _coins_available(client, headers)
+    assert coins_after == coins_before, (coins_before, coins_after)
+    ledger = (await client.get("/v1/billing/ledger", headers=headers)).json()
+    assert any(e["kind"] == "credit_release" for e in ledger), ledger
+
+
+@pytest.mark.asyncio
+async def test_cover_degrades_to_clean_vocal_without_ffmpeg(client, app):
+    """Без ffmpeg (или без инструментал-стемов) микс невозможен → cover деградирует
+    до чистого converted vocal, job succeeded (не failed). НЕ используется
+    source_audio_url как инструментал (устранён double-vocal fallback)."""
+    headers = await auth_headers(client)
+    await grant_weekly_subscription(client, headers)
+
+    resp = await client.post(
+        "/v1/covers",
+        json={"source_audio_url": "https://cdn.local/original_song.mp3"},
+        headers=headers,
+    )
+    job_id = resp.json()["jobId"]
+
+    # Стемы с вокалом + инструменталом; ffmpeg в CI отсутствует → build_instrumental
+    # недоступен, микс пропускается, отдаётся чистый converted vocal.
+    rid = await provider_request_id(app, job_id)
+    await emit_fal_demucs_completed(
+        client, rid,
+        stems={
+            "vocals": "https://cdn.local/vocals.wav",
+            "other": "https://cdn.local/other.wav",
+        },
+    )
+    rid2 = await provider_request_id(app, job_id)
+    await emit_fal_completed(
+        client, rid2, media_url="https://cdn.local/converted_vocal.wav", duration=25.0
+    )
+
+    final = (await client.get(f"/v1/jobs/{job_id}", headers=headers)).json()
+    assert final["status"] == "completed", final
+    track = (await client.get(f"/v1/tracks/{final['trackId']}", headers=headers)).json()
+    audio_url = track["variants"][0]["audioUrl"]
+    assert audio_url == "https://cdn.local/converted_vocal.wav", audio_url
+    # Ключевой инвариант анти-double-vocal: источник НЕ подставлен как инструментал.
+    assert audio_url != "https://cdn.local/original_song.mp3"
 
 
 @pytest.mark.asyncio

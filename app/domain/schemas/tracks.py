@@ -17,6 +17,7 @@ class TrackResponse(CamelModel):
     id: str
     kind: str
     title: str | None
+    prompt: str | None = None
     job_id: str | None
     created_at: datetime
     variants: list[TrackVariantView]

@@ -11,6 +11,7 @@ from app.domain.repositories.jobs import JobsRepository
 from app.domain.repositories.tracks import TracksRepository
 from app.domain.services.audio_duration import probe_duration_seconds
 from app.domain.services.pipelines.base import BasePipeline
+from app.domain.services.track_title import derive_track_title
 
 logger = logging.getLogger(__name__)
 
@@ -239,8 +240,11 @@ class SongPipeline(BasePipeline):
                         user_id=job.user_id,
                         job_id=job_id,
                         kind=TrackKind.song,
-                        title=(job.input_payload or {}).get("title"),
-                        meta={"runtime": runtime},
+                        title=derive_track_title("song", job.input_payload),
+                        meta={
+                            "runtime": runtime,
+                            "prompt": (job.input_payload or {}).get("prompt"),
+                        },
                     )
                     await tracks.add_variant(
                         track_id=track.id,
