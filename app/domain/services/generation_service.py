@@ -50,19 +50,27 @@ class GenerationService:
         """Валидирует и резолвит `cover.targetVoice` (JobType.cover).
 
         Валиден, если значение: пустое | UUID собственного ready-профиля |
-        активный `preset_voices.key`. Для собственного клона переписывает
-        `payload["target_voice"]` на `profile.provider_voice_id`, для ключа пресета —
-        на `preset.provider_voice` (в fal всегда уходит провайдерский voice-id, не
-        внутренний UUID и не публичный key). Иначе → 422 unknown_voice.
+        активный `preset_voices.key`. Ветвление cover-конвертации (ADR-009):
+
+        - **свой ready-клон** → `_voice_kind="clone"`, `_target_voice_sample_url` =
+          образец голоса (`profile.sample_asset_url`). `target_voice` НЕ переписывается
+          на minimax `provider_voice_id`: тот несовместим с audio-to-audio конверсией
+          (chatterbox использует образец как аудио-референс).
+        - **ключ пресета** → `_voice_kind="preset"`, `target_voice = preset.provider_voice`
+          (ElevenLabs voice-changer, как раньше).
+        - **пусто** → без изменений (дефолтная voice-changer ветка).
+
+        Иначе → 422 unknown_voice.
         """
         raw = payload.get("target_voice")
         if raw is None or (isinstance(raw, str) and not raw.strip()):
             return
         value = str(raw).strip()
 
-        # Случай: UUID собственного ready-профиля (My Clones) — переписываем
-        # payload на провайдерский voice-id (ADR-006 §3): в fal должен уйти
-        # реальный ElevenLabs voice-id, а не внутренний DB-UUID профиля.
+        # Случай: UUID собственного ready-профиля (My Clones). ADR-009: конвертация
+        # идёт через chatterbox speech-to-speech с образцом голоса как аудио-референсом,
+        # поэтому в payload кладём _voice_kind="clone" + _target_voice_sample_url, а
+        # target_voice (minimax-id) НЕ используем.
         profile_uuid: UUID | None = None
         try:
             profile_uuid = UUID(value)
@@ -76,23 +84,25 @@ class GenerationService:
                 and profile.user_id == user_id
                 and profile.status == VoiceProfileStatus.ready
             ):
-                # Defensive: ready-профиль без provider_voice_id слать в fal нельзя.
+                # Defensive: ready-клон без образца голоса конвертировать нечем.
                 if not (
-                    profile.provider_voice_id and profile.provider_voice_id.strip()
+                    profile.sample_asset_url and profile.sample_asset_url.strip()
                 ):
                     raise ValidationFailed(
                         details={"reason": "unknown_voice"}, http_status=422
                     )
-                payload["target_voice"] = profile.provider_voice_id
+                payload["_voice_kind"] = "clone"
+                payload["_target_voice_sample_url"] = profile.sample_asset_url
                 return
             raise ValidationFailed(
                 details={"reason": "unknown_voice"}, http_status=422
             )
 
-        # Случай: ключ активного пресета — переписываем на provider_voice.
+        # Случай: ключ активного пресета — переписываем на provider_voice (ElevenLabs).
         async with self._sessionmaker() as session:
             preset = await PresetVoicesRepository(session).get_by_key(value)
         if preset is not None and preset.active:
+            payload["_voice_kind"] = "preset"
             payload["target_voice"] = preset.provider_voice
             return
         raise ValidationFailed(details={"reason": "unknown_voice"}, http_status=422)

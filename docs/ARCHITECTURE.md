@@ -160,9 +160,32 @@ demucs не отдаёт `accompaniment`/`instrumental` — только `drums/
   (только активные, сортировка `sort_order, title`); схема **без** `provider_voice`.
 - **Резолв `cover.targetVoice`** (в `generation_service.create_job`, `JobType.cover`): значение
   валидно если пустое **или** UUID собственного `ready`-клона **или** активный `key` пресета;
-  иначе `ValidationFailed(reason="unknown_voice")` (422). **Инвариант:** при совпадении с ключом
-  пресета `payload["target_voice"]` переписывается на резолвнутое `provider_voice` **до** сохранения
-  job — в fal уходит провайдерское значение, наружу клиент оперирует только `key`.
+  иначе `ValidationFailed(reason="unknown_voice")` (422). Резолв кладёт во внутренний
+  `job.input_payload` (`_`-префиксные ключи) **дискриминатор ветки конвертации** `_voice_kind`
+  (`preset` | `clone`), см. ниже. Наружу клиент оперирует только `key`/UUID.
+- **Ветвление cover-конвертации по источнику голоса ([ADR-009](./adr/ADR-009-cover-cloned-voice-conversion.md)).**
+  cover — это **audio-to-audio voice conversion** вокального стема. Провайдер конвертации выбирается
+  по источнику голоса, потому что клон (minimax) и ElevenLabs voice-changer **несовместимы**
+  (minimax `custom_voice_id` пригоден только для minimax **TTS**, не для конверсии вокала; ElevenLabs
+  voice-changer принимает только имена голосов своего аккаунта и не имеет на fal endpoint добавления
+  кастомного голоса):
+
+  | `_voice_kind` | Источник | Модель | Целевой голос в fal |
+  |---|---|---|---|
+  | `preset` (или пусто) | активный `preset_voices.key` | `FAL_VOICE_CHANGER_MODEL` (ElevenLabs voice-changer) | `voice` = `preset.provider_voice`; пусто → дефолт |
+  | `clone` | UUID собственного `ready`-профиля | `FAL_VOICE_CONVERSION_MODEL` = `fal-ai/chatterbox/speech-to-speech` | `target_voice_audio_url` = `VoiceProfile.sample_asset_url` (zero-shot аудио-референс) |
+
+  **Инвариант резолва (пресет):** `payload["target_voice"]` переписывается на `preset.provider_voice`
+  **до** сохранения job (в fal уходит провайдерское имя ElevenLabs). **Инвариант резолва (клон):**
+  вместо перезаписи `target_voice` на minimax-id (это давало fal 422) выставляются
+  `_voice_kind="clone"` и `_target_voice_sample_url = profile.sample_asset_url`; при пустом
+  `sample_asset_url` у `ready`-клона → `422 unknown_voice`. `provider_voice_id` (minimax) для cover
+  **не используется** — cover опирается на образец голоса. **Миграция клонов не нужна:**
+  `sample_asset_url` сохраняется у каждого профиля при `create_profile` (request-time). Poller/webhook
+  для cover-конвертации не зависят от `job.provider_model` (опрашиваются сохранённые
+  `_fal_status_url`/`_fal_response_url`), поэтому смена модели на chatterbox polling не ломает. Схема
+  `VoiceProfile` не меняется, колонка `provider` не вводится (дискриминатор — источник голоса).
+  Вестигиальность minimax-clone — [TD-008](./100-known-tech-debt.md#td-008).
 - **Превью** заполнены оффлайн (бэкфилл-миграция `0014_seed_preset_voice_previews`,
   `down_revision="0013_video_stages"` — реальные fal voice-changer URL для 8 пресетов,
   выполнена → [TD-006 (closed)](./100-known-tech-debt.md#td-006)), не в request-флоу: схема терпит

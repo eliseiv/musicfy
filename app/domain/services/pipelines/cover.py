@@ -88,15 +88,30 @@ class CoverPipeline(BasePipeline):
         await self._finalize(job.id, await self._get_runtime(job.id))
 
     async def _submit_voice_conversion(self, job: Job, vocal_url: str) -> None:
-        target_voice = (job.input_payload or {}).get("target_voice") or "default"
+        payload = job.input_payload or {}
+        voice_kind = payload.get("_voice_kind")
         await self._record_stage(job.id, JobStage.voice_conversion, "running")
         try:
-            submit = await self._fal.submit_voice_changer(
-                audio_url=vocal_url,
-                target_voice=target_voice,
-                webhook_url=self._webhook_url(),
-                idempotency_key=f"{job.id}:vc",
-            )
+            if voice_kind == "clone":
+                # ADR-009: клон-голос конвертируется chatterbox speech-to-speech с
+                # образцом голоса как аудио-референсом (minimax-id несовместим с
+                # ElevenLabs voice-changer). _target_voice_sample_url гарантирован
+                # непустым резолвом (пустой → 422 ещё до создания job).
+                submit = await self._fal.submit_speech_to_speech(
+                    source_audio_url=vocal_url,
+                    target_voice_audio_url=payload["_target_voice_sample_url"],
+                    webhook_url=self._webhook_url(),
+                    idempotency_key=f"{job.id}:vc",
+                )
+            else:
+                # Пресет или дефолт: ElevenLabs voice-changer по имени голоса (как раньше).
+                target_voice = payload.get("target_voice") or "default"
+                submit = await self._fal.submit_voice_changer(
+                    audio_url=vocal_url,
+                    target_voice=target_voice,
+                    webhook_url=self._webhook_url(),
+                    idempotency_key=f"{job.id}:vc",
+                )
         except (FalProviderError, FalTimeout) as exc:
             await self._record_stage(
                 job.id, JobStage.voice_conversion, "failed", error=str(exc)

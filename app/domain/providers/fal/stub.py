@@ -29,11 +29,13 @@ class StubFalProvider:
         *,
         webhook_secret: str = "",
         video_lyrics_bg_model: str = "",
+        voice_conversion_model: str = "",
     ) -> None:
         self._webhook_secret = webhook_secret
         # Симметрия конструктора с FalAiProvider; стаб отдаёт синтетику, поэтому
         # реальную модель не дёргает (submit-и игнорируют строки моделей).
         self._video_lyrics_bg_model = video_lyrics_bg_model
+        self._voice_conversion_model = voice_conversion_model
 
     async def aclose(self) -> None:
         pass
@@ -98,6 +100,14 @@ class StubFalProvider:
         self, *, audio_url, target_voice, webhook_url, idempotency_key
     ) -> FalSubmitResult:
         return self._submit("voice-changer")
+
+    async def submit_speech_to_speech(
+        self, *, source_audio_url, target_voice_audio_url, webhook_url, idempotency_key
+    ) -> FalSubmitResult:
+        # ADR-009: клон-ветка cover. Симметрично voice-changer стабу — синтетический
+        # queued-результат; форма готового результата ({"audio": {"url"}}) эмитится
+        # тестовым webhook'ом через общий parse_fal_webhook_event, как у voice-changer.
+        return self._submit("speech-to-speech")
 
     async def submit_lipsync_video(
         self, *, video_url, audio_url, webhook_url, idempotency_key

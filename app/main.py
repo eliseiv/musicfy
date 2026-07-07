@@ -42,6 +42,7 @@ def _default_fal_factory(settings: Settings):
         return StubFalProvider(
             webhook_secret=settings.FAL_WEBHOOK_SECRET.get_secret_value(),
             video_lyrics_bg_model=settings.FAL_VIDEO_LYRICS_BG_MODEL,
+            voice_conversion_model=settings.FAL_VOICE_CONVERSION_MODEL,
         )
     key = settings.FAL_API_KEY.get_secret_value()
     if not key:
@@ -57,6 +58,7 @@ def _default_fal_factory(settings: Settings):
         lyrics_llm=settings.FAL_LYRICS_LLM,
         demucs_model=settings.FAL_DEMUCS_MODEL,
         voice_changer_model=settings.FAL_VOICE_CHANGER_MODEL,
+        voice_conversion_model=settings.FAL_VOICE_CONVERSION_MODEL,
         video_avatar_model=settings.FAL_VIDEO_AVATAR_MODEL,
         video_avatar_image_model=settings.FAL_VIDEO_AVATAR_IMAGE_MODEL,
         video_visual_model=settings.FAL_VIDEO_VISUAL_MODEL,

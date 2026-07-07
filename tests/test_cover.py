@@ -232,13 +232,16 @@ async def test_cover_unknown_target_voice_422(client):
 
 @pytest.mark.asyncio
 async def test_cover_own_ready_profile_uuid_resolves(client, app):
-    """UUID своего ready-профиля → 202; payload переписан на profile.provider_voice_id."""
+    """ADR-009: UUID своего ready-клона → 202; payload помечен как clone-ветка
+    (`_voice_kind="clone"` + `_target_voice_sample_url` = образец голоса). minimax
+    `provider_voice_id` для cover больше НЕ используется — `target_voice` НЕ
+    переписывается на него (chatterbox работает с аудио-референсом, а не с id)."""
     headers = await auth_headers(client)
     await grant_weekly_subscription(client, headers)
     profile = await _create_ready_profile(client, headers)
     profile_id = profile["id"]
-    expected_voice_id = profile["providerVoiceId"]
-    assert expected_voice_id, profile
+    minimax_voice_id = profile["providerVoiceId"]
+    assert minimax_voice_id, profile
 
     resp = await client.post(
         "/v1/covers",
@@ -249,7 +252,12 @@ async def test_cover_own_ready_profile_uuid_resolves(client, app):
     job_id = resp.json()["jobId"]
 
     payload = await job_input_payload(app, job_id)
-    assert payload["target_voice"] == expected_voice_id, payload
+    # Клон-ветка: дискриминатор + аудио-образец голоса как референс.
+    assert payload.get("_voice_kind") == "clone", payload
+    assert payload.get("_target_voice_sample_url") == "https://cdn.local/voice.wav", payload
+    # minimax provider_voice_id НЕ подставлен ни в target_voice, ни в референс.
+    assert payload.get("_target_voice_sample_url") != minimax_voice_id, payload
+    assert payload.get("target_voice") != minimax_voice_id, payload
 
 
 @pytest.mark.asyncio

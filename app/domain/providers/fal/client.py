@@ -52,6 +52,7 @@ class FalAiProvider:
         lyrics_llm: str,
         demucs_model: str,
         voice_changer_model: str,
+        voice_conversion_model: str = "fal-ai/chatterbox/speech-to-speech",
         video_avatar_model: str,
         video_avatar_image_model: str,
         video_visual_model: str,
@@ -71,6 +72,7 @@ class FalAiProvider:
         self._lyrics_llm = lyrics_llm
         self._demucs_model = demucs_model
         self._voice_changer_model = voice_changer_model
+        self._voice_conversion_model = voice_conversion_model
         self._video_avatar_model = video_avatar_model
         self._video_avatar_image_model = video_avatar_image_model
         self._video_visual_model = video_visual_model
@@ -309,6 +311,29 @@ class FalAiProvider:
         payload: dict[str, Any] = {"audio_url": audio_url, "voice": target_voice}
         return await self._submit(
             model=self._voice_changer_model,
+            payload=payload,
+            webhook_url=webhook_url,
+            idempotency_key=idempotency_key,
+        )
+
+    async def submit_speech_to_speech(
+        self,
+        *,
+        source_audio_url: str,
+        target_voice_audio_url: str,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        # ADR-009: конвертация вокала в клон-голос. Поля сверены по live fal OpenAPI
+        # (queue, endpoint fal-ai/chatterbox/speech-to-speech): source_audio_url —
+        # required, target_voice_audio_url — референс целевого голоса (optional в схеме,
+        # но для клон-cover обязателен). Выход — {"audio": {"url": …}} (extract_media ест).
+        payload: dict[str, Any] = {
+            "source_audio_url": source_audio_url,
+            "target_voice_audio_url": target_voice_audio_url,
+        }
+        return await self._submit(
+            model=self._voice_conversion_model,
             payload=payload,
             webhook_url=webhook_url,
             idempotency_key=idempotency_key,

@@ -132,6 +132,20 @@ class FalProvider(Protocol):
         idempotency_key: str,
     ) -> FalSubmitResult: ...
 
+    async def submit_speech_to_speech(
+        self,
+        *,
+        source_audio_url: str,
+        target_voice_audio_url: str,
+        webhook_url: str | None,
+        idempotency_key: str,
+    ) -> FalSubmitResult:
+        """Конвертация вокала в клон-голос (ADR-009, chatterbox speech-to-speech).
+
+        target_voice_audio_url — аудио-образец целевого голоса (референс, zero-shot).
+        """
+        ...
+
     # ----- video -----
     async def submit_lipsync_video(
         self,

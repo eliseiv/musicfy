@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     FAL_LYRICS_LLM: str = "anthropic/claude-3-5-haiku"
     FAL_DEMUCS_MODEL: str = "fal-ai/demucs"
     FAL_VOICE_CHANGER_MODEL: str = "fal-ai/elevenlabs/voice-changer"
+    # Конвертация клон-голоса в cover (ADR-009): audio-to-audio с образцом голоса как
+    # референсом (zero-shot, без provider-id). Пресет-ветка остаётся на voice-changer.
+    FAL_VOICE_CONVERSION_MODEL: str = "fal-ai/chatterbox/speech-to-speech"
     # Видео-модели по режиму (ADR-007). FAL_VIDEO_MODEL — легаси-алиас avatar-модели.
     FAL_VIDEO_MODEL: str = _DEFAULT_VIDEO_AVATAR_MODEL
     # avatar_performance + source video (липсинк «видео→видео»).

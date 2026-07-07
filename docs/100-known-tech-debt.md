@@ -12,6 +12,29 @@
 | [TD-005](#td-005) | Нет background job runner для тяжёлых синхронных задач вне request-пути (статический фон lyrics_video отложен) | medium | open |
 | [TD-006](#td-006) | Превью-сэмплы пресет-голосов не сгенерированы/не забэкфилены — `preset_voices.preview_url` / `sample_duration_seconds` = NULL; ▶️ на вкладке AI Voices нефункционально | low | closed |
 | [TD-007](#td-007) | Инструментал cover — простой ffmpeg-микс не-вокальных стемов; при отсутствии ffmpeg/стемов деградирует до чистого конвертированного вокала | low | open |
+| [TD-008](#td-008) | minimax/voice-clone вестигиален для cover: его custom_voice_id не используется, но «готовность» клона всё ещё гейтится успехом minimax-вызова | low | open |
+
+---
+
+## TD-008 — minimax voice-clone вестигиален для cover, но гейтит готовность клона {#td-008}
+
+- **Контекст:** после [ADR-009](./adr/ADR-009-cover-cloned-voice-conversion.md) cover для собственного
+  клона конвертирует через `fal-ai/chatterbox/speech-to-speech`, используя **образец голоса**
+  (`VoiceProfile.sample_asset_url`) как аудио-референс. `VoiceProfile.provider_voice_id` (minimax
+  `custom_voice_id`, `FAL_VOICE_CLONE_MODEL = fal-ai/minimax/voice-clone`) для cover **больше не
+  используется**. При этом `voice_clone.py` по-прежнему вызывает minimax и при его сбое помечает
+  профиль `failed`.
+- **Последствие:** «готовность» клона гейтится успехом minimax-вызова, который для cover не нужен.
+  Сбой/недоступность minimax блокирует клон, который по факту работал бы в cover через chatterbox
+  (нужен лишь валидный consent + образец). Плюс лишний fal-cost на каждый клон.
+- **Серьёзность — low:** основной путь (minimax доступен) даёт `ready`-профиль, cover работает;
+  minimax `custom_voice_id` может пригодиться будущей фиче «TTS в вашем голосе». Деградация — только
+  при недоступности minimax.
+- **Митигация сейчас:** осознанно оставлено вне scope фикса ADR-009 (минимизация изменений). cover
+  для существующих и новых `ready`-клонов работает через сохранённый образец.
+- **Возможное закрытие:** отвязать «готовность» клона от minimax-вызова — гейтить только на
+  `consent + sample_asset_url`; minimax-clone сделать best-effort (не валит профиль) либо удалить,
+  если фича «TTS в вашем голосе» не планируется.
 
 ---
 
