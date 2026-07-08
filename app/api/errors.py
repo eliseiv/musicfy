@@ -133,6 +133,12 @@ class VoiceProfileNotFound(APIError):
     message = "Voice profile not found"
 
 
+class VideoNotFound(APIError):
+    code = "VIDEO_NOT_FOUND"
+    http_status = 404
+    message = "Video not found"
+
+
 class LyricsDraftNotFound(APIError):
     code = "LYRICS_DRAFT_NOT_FOUND"
     http_status = 404

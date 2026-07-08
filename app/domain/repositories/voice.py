@@ -54,7 +54,23 @@ class VoiceRepository:
         return profile
 
     async def get_profile(self, profile_id: UUID) -> VoiceProfile | None:
+        """PK-резолв без фильтра `deleted_at` (create-flow read / internal).
+
+        Для user-read/ownership и resolve-путей, где soft-deleted профиль обязан
+        трактоваться как несуществующий, используется `get_active_profile`.
+        """
         return await self._session.get(VoiceProfile, profile_id)
+
+    async def get_active_profile(self, profile_id: UUID) -> VoiceProfile | None:
+        """Резолв активного (не soft-deleted) профиля.
+
+        Используется в `_resolve_target_voice` (источник нового cover) и в
+        owner-check `DELETE /v1/voices/{id}`: удалённый профиль → отсутствует.
+        """
+        stmt = select(VoiceProfile).where(
+            VoiceProfile.id == profile_id, VoiceProfile.deleted_at.is_(None)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def update_profile(
         self, *, profile_id: UUID, provider_voice_id: str | None,
@@ -73,7 +89,10 @@ class VoiceRepository:
     async def list_profiles(self, user_id: UUID) -> list[VoiceProfile]:
         stmt = (
             select(VoiceProfile)
-            .where(VoiceProfile.user_id == user_id)
+            .where(
+                VoiceProfile.user_id == user_id,
+                VoiceProfile.deleted_at.is_(None),
+            )
             .order_by(VoiceProfile.created_at.desc())
         )
         return list((await self._session.execute(stmt)).scalars().all())

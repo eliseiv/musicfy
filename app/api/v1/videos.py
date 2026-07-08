@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.errors import JobNotFound, TrackNotFound, ValidationFailed
+from app.api.errors import (
+    JobNotFound,
+    TrackNotFound,
+    ValidationFailed,
+    VideoNotFound,
+)
 from app.deps import get_current_user, get_generation_service, get_sessionmaker
 from app.domain.enums import AssetKind, JobType, VideoMode
 from app.domain.models.asset import Asset
@@ -114,6 +120,7 @@ async def get_video(
             select(Asset)
             .where(Asset.user_id == current.id, Asset.kind == AssetKind.video)
             .where(Asset.meta["job_id"].astext == str(job_id))
+            .where(Asset.deleted_at.is_(None))
             .limit(1)
         )
         asset = (await session.execute(stmt)).scalars().first()
@@ -127,3 +134,43 @@ async def get_video(
             style=meta.get("style"),
             created_at=asset.created_at if asset else None,
         )
+
+
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    summary="Удалить видео",
+    responses={404: {"description": "Видео не найдено, не готово или уже удалено"}},
+)
+async def delete_video(
+    job_id: UUID,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> Response:
+    """Soft-delete video-ассета по job_id (ADR-011).
+
+    Целится в video-`Asset` (kind=video, meta.job_id). `Job` сохраняется (история/
+    биллинг/ledger); монеты не возвращаем; медиа провайдера не трогаем. Нет джобы/
+    чужая/не-video → 404 VIDEO_NOT_FOUND; нет ассета (не готово/уже удалено) → 404.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            job = await JobsRepository(session).get_by_id(job_id)
+            if (
+                job is None
+                or job.user_id != current.id
+                or job.job_type != JobType.video
+            ):
+                raise VideoNotFound()
+            stmt = (
+                select(Asset)
+                .where(Asset.user_id == current.id, Asset.kind == AssetKind.video)
+                .where(Asset.meta["job_id"].astext == str(job_id))
+                .where(Asset.deleted_at.is_(None))
+                .limit(1)
+            )
+            asset = (await session.execute(stmt)).scalars().first()
+            if asset is None:
+                raise VideoNotFound()
+            asset.deleted_at = datetime.now(UTC)
+    return Response(status_code=204)

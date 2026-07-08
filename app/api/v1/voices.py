@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.errors import ValidationFailed
+from app.api.errors import ValidationFailed, VoiceProfileNotFound
 from app.deps import get_current_user, get_generation_service, get_sessionmaker
 from app.domain.enums import JobType, VoiceConsentKind
 from app.domain.models.user import User
@@ -100,3 +102,29 @@ async def list_voices(
             )
             for p in profiles
         ]
+
+
+@router.delete(
+    "/{voice_id}",
+    status_code=204,
+    summary="Удалить голос",
+    responses={404: {"description": "Голос не найден или уже удалён"}},
+)
+async def delete_voice(
+    voice_id: UUID,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> Response:
+    """Soft-delete профиля голоса (ADR-011).
+
+    Скрывает профиль из листингов/резолвов. Consent, sample-asset и голос у
+    провайдера НЕ трогаем; монеты не возвращаем. Повтор/чужой → 404.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            repo = VoiceRepository(session)
+            profile = await repo.get_active_profile(voice_id)
+            if profile is None or profile.user_id != current.id:
+                raise VoiceProfileNotFound()
+            profile.deleted_at = datetime.now(UTC)
+    return Response(status_code=204)

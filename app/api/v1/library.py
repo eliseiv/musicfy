@@ -42,6 +42,7 @@ async def library(
         video_stmt = (
             select(Asset)
             .where(Asset.user_id == current.id, Asset.kind == AssetKind.video)
+            .where(Asset.deleted_at.is_(None))
             .order_by(Asset.created_at.desc())
             .limit(100)
         )

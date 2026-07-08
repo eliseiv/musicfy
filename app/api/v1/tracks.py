@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.errors import TrackNotFound
 from app.deps import get_current_user, get_sessionmaker
@@ -44,3 +46,30 @@ async def get_track(
                 for v in variants
             ],
         )
+
+
+@router.delete(
+    "/{track_id}",
+    status_code=204,
+    summary="Удалить трек",
+    responses={404: {"description": "Трек не найден или уже удалён"}},
+)
+async def delete_track(
+    track_id: UUID,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> Response:
+    """Soft-delete трека (ADR-011).
+
+    Скрывает трек из листингов и как источник новых видео. Варианты остаются в БД
+    недостижимыми; уже созданные видео (снапшот audio_url) не затрагиваются; монеты
+    не возвращаем. Повтор/чужой → 404.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            repo = TracksRepository(session)
+            track = await repo.get(track_id)
+            if track is None or track.user_id != current.id:
+                raise TrackNotFound()
+            track.deleted_at = datetime.now(UTC)
+    return Response(status_code=204)

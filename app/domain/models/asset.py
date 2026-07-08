@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    Enum as SAEnum,
-)
-from sqlalchemy import (
+    DateTime,
     ForeignKey,
     Index,
     Numeric,
     String,
     text,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -50,3 +52,6 @@ class Asset(Base, TimestampMixin):
     duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Numeric(20, 0), nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

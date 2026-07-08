@@ -234,7 +234,9 @@ class SongPipeline(BasePipeline):
                 if job is None:
                     return
                 tracks = TracksRepository(session)
-                existing_track = await tracks.get_by_job_id(job_id)
+                existing_track = await tracks.get_by_job_id(
+                    job_id, include_deleted=True
+                )
                 if existing_track is None:
                     track = await tracks.create(
                         user_id=job.user_id,

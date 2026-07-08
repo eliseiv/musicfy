@@ -164,7 +164,7 @@ class CoverPipeline(BasePipeline):
                 if job is None:
                     return
                 tracks = TracksRepository(session)
-                if await tracks.get_by_job_id(job_id) is None:
+                if await tracks.get_by_job_id(job_id, include_deleted=True) is None:
                     track = await tracks.create(
                         user_id=job.user_id, job_id=job_id, kind=TrackKind.cover,
                         title=derive_track_title("cover", job.input_payload),

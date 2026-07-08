@@ -255,15 +255,39 @@
         ],
         "summary": "Сгенерировать текст",
         "operationId": "generate_lyrics_v1_lyrics_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GenerateLyricsRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -286,12 +310,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/v1/lyrics/{draft_id}": {
@@ -832,6 +851,51 @@
         ]
       }
     },
+    "/v1/voices/{voice_id}": {
+      "delete": {
+        "tags": [
+          "Голоса"
+        ],
+        "summary": "Удалить голос",
+        "description": "Soft-delete профиля голоса (ADR-011).\n\nСкрывает профиль из листингов/резолвов. Consent, sample-asset и голос у\nпровайдера НЕ трогаем; монеты не возвращаем. Повтор/чужой → 404.",
+        "operationId": "delete_voice_v1_voices__voice_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Voice Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Голос не найден или уже удалён"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/videos": {
       "post": {
         "tags": [
@@ -931,6 +995,49 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Видео"
+        ],
+        "summary": "Удалить видео",
+        "description": "Soft-delete video-ассета по job_id (ADR-011).\n\nЦелится в video-`Asset` (kind=video, meta.job_id). `Job` сохраняется (история/\nбиллинг/ledger); монеты не возвращаем; медиа провайдера не трогаем. Нет джобы/\nчужая/не-video → 404 VIDEO_NOT_FOUND; нет ассета (не готово/уже удалено) → 404.",
+        "operationId": "delete_video_v1_videos__job_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Видео не найдено, не готово или уже удалено"
           },
           "422": {
             "description": "Validation Error",
@@ -1066,6 +1173,49 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Треки"
+        ],
+        "summary": "Удалить трек",
+        "description": "Soft-delete трека (ADR-011).\n\nСкрывает трек из листингов и как источник новых видео. Варианты остаются в БД\nнедостижимыми; уже созданные видео (снапшот audio_url) не затрагиваются; монеты\nне возвращаем. Повтор/чужой → 404.",
+        "operationId": "delete_track_v1_tracks__track_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Track Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Трек не найден или уже удалён"
           },
           "422": {
             "description": "Validation Error",

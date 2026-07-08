@@ -78,7 +78,7 @@ class GenerationService:
             profile_uuid = None
         if profile_uuid is not None:
             async with self._sessionmaker() as session:
-                profile = await VoiceRepository(session).get_profile(profile_uuid)
+                profile = await VoiceRepository(session).get_active_profile(profile_uuid)
             if (
                 profile is not None
                 and profile.user_id == user_id
