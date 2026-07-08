@@ -14,3 +14,5 @@
 | [ADR-007](./ADR-007-video-three-modes.md) | Видео-генерация на 3 режима (Avatar / Visual Clip / Lyrics Video) | Accepted | 2026-07-06 |
 | [ADR-008](./ADR-008-demucs-stems-and-track-metadata.md) | Разбор demucs-стемов (верхнеуровневые ключи) + метаданные трека (промпт + автозаголовок) | Accepted | 2026-07-07 |
 | [ADR-009](./ADR-009-cover-cloned-voice-conversion.md) | Cover с клонированным голосом: совместимый провайдер конвертации (chatterbox speech-to-speech) | Accepted | 2026-07-07 |
+| [ADR-010](./ADR-010-lyrics-sync-billing.md) | Биллинг синхронной генерации lyrics: атомарный charge + refund (дополняет ADR-005) | Accepted | 2026-07-08 |
+| [ADR-011](./ADR-011-user-resource-deletion.md) | Удаление пользовательских ресурсов (voices/tracks/videos): soft-delete | Accepted | 2026-07-08 |

@@ -135,7 +135,9 @@ def create_app(
                 app.state.sessionmaker, runner, settings, credits=credits,
                 moderation=moderation, analytics=analytics,
             )
-            app.state.lyrics_service = LyricsService(app.state.sessionmaker, fal)
+            app.state.lyrics_service = LyricsService(
+                app.state.sessionmaker, fal, credits=credits
+            )
             app.state.asset_service = AssetService(app.state.sessionmaker, fal)
 
             try:

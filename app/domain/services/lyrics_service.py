@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -8,16 +8,21 @@ from app.api.errors import LyricsDraftNotFound
 from app.domain.models.lyrics_draft import LyricsDraft
 from app.domain.providers.fal.base import FalProvider
 from app.domain.repositories.lyrics import LyricsRepository
+from app.domain.services.credits import CoinWalletService
 
 
 class LyricsService:
     """Синхронная генерация и редактирование текста песни (LLM-пайплайн)."""
 
     def __init__(
-        self, sessionmaker: async_sessionmaker[AsyncSession], fal: FalProvider
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        fal: FalProvider,
+        credits: CoinWalletService,
     ) -> None:
         self._sessionmaker = sessionmaker
         self._fal = fal
+        self._credits = credits
 
     async def generate(
         self,
@@ -27,22 +32,43 @@ class LyricsService:
         language: str = "en",
         genre: str | None = None,
         mood: str | None = None,
+        idempotency_key: str | None = None,
     ) -> LyricsDraft:
-        content = await self._fal.generate_lyrics(
-            prompt=prompt, language=language, genre=genre, mood=mood
+        op_id = idempotency_key or str(uuid4())
+        # Списание ДО fal (fail-fast 402 без траты на провайдера); саговый refund
+        # при любом сбое после charge (ADR-010).
+        charged = await self._credits.charge(
+            user_id=user_id,
+            job_type="lyrics",
+            idempotency_key=f"charge:lyrics:{op_id}",
+            ref_type="lyrics",
+            ref_id=str(op_id),
         )
-        async with self._sessionmaker() as session:
-            async with session.begin():
-                draft = await LyricsRepository(session).create(
-                    user_id=user_id,
-                    content=content,
-                    prompt=prompt,
-                    language=language,
-                    genre=genre,
-                    mood=mood,
-                    source="generated",
-                )
-            session.expunge(draft)
+        try:
+            content = await self._fal.generate_lyrics(
+                prompt=prompt, language=language, genre=genre, mood=mood
+            )
+            async with self._sessionmaker() as session:
+                async with session.begin():
+                    draft = await LyricsRepository(session).create(
+                        user_id=user_id,
+                        content=content,
+                        prompt=prompt,
+                        language=language,
+                        genre=genre,
+                        mood=mood,
+                        source="generated",
+                    )
+                session.expunge(draft)
+        except Exception:
+            await self._credits.refund(
+                user_id=user_id,
+                units=charged,
+                idempotency_key=f"refund:lyrics:{op_id}",
+                ref_type="lyrics",
+                ref_id=str(op_id),
+            )
+            raise
         return draft
 
     async def get(self, *, user_id: UUID, draft_id: UUID) -> LyricsDraft:

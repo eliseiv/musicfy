@@ -68,6 +68,84 @@ class CoinWalletService:
                 )
         return price
 
+    async def charge(
+        self,
+        *,
+        user_id: UUID,
+        job_type: str,
+        idempotency_key: str,
+        ref_type: str | None = None,
+        ref_id: str | None = None,
+    ) -> int:
+        """Атомарное одношаговое списание цены типа (sync-путь, Job-free).
+
+        Порядок dedup-first (как capture): проверка средств выполняется ТОЛЬКО на
+        новой записи ledger, иначе идемпотентный ретрай ложно падал бы 402.
+        Возвращает списанную цену; 0 — бесплатный тип (нет строки / price_coins=0).
+        """
+        async with self._sessionmaker() as session:
+            async with session.begin():
+                price = await PricingRepository(session).get_active_price(job_type)
+                price = int(price or 0)
+                if price <= 0:
+                    return 0
+                repo = CreditsRepository(session)
+                wallet = await repo.ensure_wallet(user_id)
+                newly = await repo.append_ledger(
+                    user_id=user_id,
+                    kind=CreditLedgerKind.debit_capture,
+                    amount=-price,
+                    ref_type=ref_type,
+                    ref_id=ref_id,
+                    idempotency_key=idempotency_key,
+                    category=None,
+                )
+                if not newly:
+                    return price
+                if wallet.coins_available < price:
+                    raise InsufficientCredits(
+                        details={
+                            "required": price,
+                            "available": int(wallet.coins_available),
+                        }
+                    )
+                wallet.coins_available -= price
+        return price
+
+    async def refund(
+        self,
+        *,
+        user_id: UUID,
+        units: int,
+        idempotency_key: str,
+        ref_type: str | None = None,
+        ref_id: str | None = None,
+    ) -> None:
+        """Компенсирующий возврат `units` монет в available (sync-путь, Job-free).
+
+        Зеркально charge: dedup-first, дубликат → no-op. НЕ трогает coins_reserved
+        (sync-путь резерв не создаёт).
+        """
+        if units <= 0:
+            return
+        async with self._sessionmaker() as session:
+            async with session.begin():
+                repo = CreditsRepository(session)
+                newly = await repo.append_ledger(
+                    user_id=user_id,
+                    kind=CreditLedgerKind.credit_refund,
+                    amount=units,
+                    ref_type=ref_type,
+                    ref_id=ref_id,
+                    idempotency_key=idempotency_key,
+                    category=None,
+                )
+                if not newly:
+                    return
+                wallet = await repo.get_wallet_for_update(user_id)
+                if wallet is not None:
+                    wallet.coins_available += units
+
     async def capture(self, *, job: Job) -> int:
         """Подтверждает списание зарезервированных монет. Идемпотентно по job.
 

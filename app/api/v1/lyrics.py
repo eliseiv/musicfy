@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app.deps import get_current_user, get_lyrics_service
 from app.domain.models.user import User
@@ -34,6 +34,9 @@ async def generate_lyrics(
     body: GenerateLyricsRequest,
     current: Annotated[User, Depends(get_current_user)],
     lyrics: Annotated[LyricsService, Depends(get_lyrics_service)],
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key", max_length=128)
+    ] = None,
 ) -> LyricsDraftResponse:
     draft = await lyrics.generate(
         user_id=current.id,
@@ -41,6 +44,7 @@ async def generate_lyrics(
         language=body.language,
         genre=body.genre,
         mood=body.mood,
+        idempotency_key=idempotency_key,
     )
     return _to_response(draft)
 
