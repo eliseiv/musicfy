@@ -16,3 +16,4 @@
 | [ADR-009](./ADR-009-cover-cloned-voice-conversion.md) | Cover с клонированным голосом: совместимый провайдер конвертации (chatterbox speech-to-speech) | Accepted | 2026-07-07 |
 | [ADR-010](./ADR-010-lyrics-sync-billing.md) | Биллинг синхронной генерации lyrics: атомарный charge + refund (дополняет ADR-005) | Accepted | 2026-07-08 |
 | [ADR-011](./ADR-011-user-resource-deletion.md) | Удаление пользовательских ресурсов (voices/tracks/videos): soft-delete | Accepted | 2026-07-08 |
+| [ADR-012](./ADR-012-user-resource-rename.md) | Переименование пользовательских ресурсов (tracks/voices/videos) + хранение title видео в meta | Accepted | 2026-07-09 |

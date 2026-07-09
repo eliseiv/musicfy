@@ -16,6 +16,7 @@ from app.domain.schemas.voices import (
     ConsentRequest,
     ConsentResponse,
     CreateVoiceRequest,
+    RenameVoiceRequest,
     VoiceProfileResponse,
 )
 from app.domain.services.generation_service import GenerationService
@@ -102,6 +103,47 @@ async def list_voices(
             )
             for p in profiles
         ]
+
+
+@router.patch(
+    "/{voice_id}",
+    response_model=VoiceProfileResponse,
+    summary="Переименовать голос",
+    responses={
+        400: {"description": "Пустое имя"},
+        404: {"description": "Голос не найден или уже удалён"},
+    },
+)
+async def rename_voice(
+    voice_id: UUID,
+    body: RenameVoiceRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> VoiceProfileResponse:
+    """Переименование профиля голоса (ADR-012).
+
+    Owner-check через `VoiceRepository.get_active_profile` (фильтрует soft-deleted).
+    Разрешено для любого не-удалённого профиля (в т.ч. pending/failed). Меняет только
+    `name` (trimmed); status/provider_voice_id/consent_id/`deleted_at` не трогает.
+    Идемпотентно. Повтор/чужой/удалён → 404. В ответе `job_id=null`.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            repo = VoiceRepository(session)
+            profile = await repo.get_active_profile(voice_id)
+            if profile is None or profile.user_id != current.id:
+                raise VoiceProfileNotFound()
+            profile.name = body.name
+            return VoiceProfileResponse(
+                id=str(profile.id),
+                name=profile.name,
+                status=profile.status.value,
+                provider_voice_id=profile.provider_voice_id,
+                preview_url=profile.sample_asset_url,
+                sample_duration_seconds=profile.sample_duration_seconds,
+                job_id=None,
+                created_at=profile.created_at,
+            )
 
 
 @router.delete(

@@ -1,13 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 
 def to_camel(name: str) -> str:
     parts = name.split("_")
     return parts[0] + "".join(p.title() for p in parts[1:])
+
+
+def _strip_nonempty(value: str) -> str:
+    """Trim по краям; пустая строка/только пробелы → ошибка валидации (→ 400 INVALID_INPUT)."""
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("must not be empty after trimming")
+    return stripped
+
+
+# Обязательная строка: trim + reject пустой/пробельной (единый контракт rename, ADR-012 §3).
+StrippedNonEmpty = Annotated[str, AfterValidator(_strip_nonempty)]
 
 
 class CamelModel(BaseModel):

@@ -11,7 +11,7 @@ from app.api.errors import TrackNotFound
 from app.deps import get_current_user, get_sessionmaker
 from app.domain.models.user import User
 from app.domain.repositories.tracks import TracksRepository
-from app.domain.schemas.tracks import TrackResponse, TrackVariantView
+from app.domain.schemas.tracks import RenameTrackRequest, TrackResponse, TrackVariantView
 
 router = APIRouter(prefix="/tracks", tags=["Треки"])
 
@@ -46,6 +46,55 @@ async def get_track(
                 for v in variants
             ],
         )
+
+
+@router.patch(
+    "/{track_id}",
+    response_model=TrackResponse,
+    summary="Переименовать трек",
+    responses={
+        400: {"description": "Пустое название"},
+        404: {"description": "Трек не найден или уже удалён"},
+    },
+)
+async def rename_track(
+    track_id: UUID,
+    body: RenameTrackRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> TrackResponse:
+    """Переименование трека (ADR-012).
+
+    Owner-check через `TracksRepository.get` (фильтрует soft-deleted). Меняет только
+    `title` (trimmed); биллинг/варианты/`deleted_at` не трогает. Идемпотентно.
+    Повтор/чужой/удалён → 404.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            repo = TracksRepository(session)
+            track = await repo.get(track_id)
+            if track is None or track.user_id != current.id:
+                raise TrackNotFound()
+            track.title = body.title
+            variants = await repo.list_variants(track_id)
+            return TrackResponse(
+                id=str(track.id),
+                kind=track.kind.value,
+                title=track.title,
+                prompt=(track.meta or {}).get("prompt"),
+                job_id=str(track.job_id) if track.job_id else None,
+                created_at=track.created_at,
+                variants=[
+                    TrackVariantView(
+                        id=str(v.id),
+                        variant_index=v.variant_index,
+                        audio_url=v.audio_url,
+                        duration_seconds=float(v.duration_seconds),
+                        stems=v.stems,
+                    )
+                    for v in variants
+                ],
+            )
 
 
 @router.delete(

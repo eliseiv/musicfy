@@ -6,7 +6,13 @@ from uuid import UUID
 from pydantic import ConfigDict, Field, model_validator
 
 from app.domain.enums import VideoAspect, VideoMode, VideoStyle
-from app.schemas.common import CamelModel
+from app.schemas.common import CamelModel, StrippedNonEmpty
+
+
+class RenameVideoRequest(CamelModel):
+    """Переименование видео (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."""
+
+    title: StrippedNonEmpty = Field(max_length=255, description="Новое название видео.")
 
 
 class CreateVideoRequest(CamelModel):
@@ -96,6 +102,7 @@ class VideoResultResponse(CamelModel):
     mode: str | None = Field(default=None, description="Режим генерации (из Asset.meta).")
     aspect_ratio: str | None = Field(default=None, description="Соотношение сторон (из Asset.meta).")
     style: str | None = Field(default=None, description="Стиль (из Asset.meta).")
+    title: str | None = Field(default=None, description="Название видео (из Asset.meta).")
     created_at: datetime | None = None
 
 

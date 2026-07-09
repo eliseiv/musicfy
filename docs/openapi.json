@@ -852,6 +852,69 @@
       }
     },
     "/v1/voices/{voice_id}": {
+      "patch": {
+        "tags": [
+          "Голоса"
+        ],
+        "summary": "Переименовать голос",
+        "description": "Переименование профиля голоса (ADR-012).\n\nOwner-check через `VoiceRepository.get_active_profile` (фильтрует soft-deleted).\nРазрешено для любого не-удалённого профиля (в т.ч. pending/failed). Меняет только\n`name` (trimmed); status/provider_voice_id/consent_id/`deleted_at` не трогает.\nИдемпотентно. Повтор/чужой/удалён → 404. В ответе `job_id=null`.",
+        "operationId": "rename_voice_v1_voices__voice_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Voice Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameVoiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустое имя"
+          },
+          "404": {
+            "description": "Голос не найден или уже удалён"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Голоса"
@@ -995,6 +1058,69 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Видео"
+        ],
+        "summary": "Переименовать видео",
+        "description": "Переименование видео (ADR-012).\n\nOwner-check по `Job` (owned + `job_type==video`) → иначе 404 VIDEO_NOT_FOUND;\nзатем резолв video-`Asset` (`kind=video`, `meta.job_id`, `deleted_at IS NULL`) —\nнет ассета (не готово/удалено) → 404. `title` пишется реассайном словаря `meta`\n(JSONB не мутируется in-place). Биллинг/`deleted_at` не трогает. Идемпотентно.",
+        "operationId": "rename_video_v1_videos__job_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameVideoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResultResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустое название"
+          },
+          "404": {
+            "description": "Видео не найдено, не готово или уже удалено"
           },
           "422": {
             "description": "Validation Error",
@@ -1173,6 +1299,69 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Треки"
+        ],
+        "summary": "Переименовать трек",
+        "description": "Переименование трека (ADR-012).\n\nOwner-check через `TracksRepository.get` (фильтрует soft-deleted). Меняет только\n`title` (trimmed); биллинг/варианты/`deleted_at` не трогает. Идемпотентно.\nПовтор/чужой/удалён → 404.",
+        "operationId": "rename_track_v1_tracks__track_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Track Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameTrackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустое название"
+          },
+          "404": {
+            "description": "Трек не найден или уже удалён"
           },
           "422": {
             "description": "Validation Error",
@@ -3331,6 +3520,54 @@
         "title": "PushTokenRequest",
         "description": "Регистрация APNs-токена для push о готовности задач."
       },
+      "RenameTrackRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "description": "Новое название трека."
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "RenameTrackRequest",
+        "description": "Переименование трека (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."
+      },
+      "RenameVideoRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "description": "Новое название видео."
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "RenameVideoRequest",
+        "description": "Переименование видео (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."
+      },
+      "RenameVoiceRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Name",
+            "description": "Новое имя профиля голоса."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "RenameVoiceRequest",
+        "description": "Переименование профиля голоса (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."
+      },
       "RestoreRequest": {
         "properties": {
           "signedTransactions": {
@@ -3722,6 +3959,18 @@
             ],
             "title": "Style",
             "description": "Стиль (из Asset.meta)."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Название видео (из Asset.meta)."
           },
           "createdAt": {
             "anyOf": [

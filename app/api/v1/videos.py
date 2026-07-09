@@ -21,7 +21,11 @@ from app.domain.models.user import User
 from app.domain.repositories.jobs import JobsRepository
 from app.domain.repositories.tracks import TracksRepository
 from app.domain.schemas.songs import JobAcceptedResponse
-from app.domain.schemas.videos import CreateVideoRequest, VideoResultResponse
+from app.domain.schemas.videos import (
+    CreateVideoRequest,
+    RenameVideoRequest,
+    VideoResultResponse,
+)
 from app.domain.services.generation_service import GenerationService
 
 router = APIRouter(prefix="/videos", tags=["Видео"])
@@ -132,8 +136,64 @@ async def get_video(
             mode=meta.get("mode"),
             aspect_ratio=meta.get("aspect_ratio"),
             style=meta.get("style"),
+            title=meta.get("title"),
             created_at=asset.created_at if asset else None,
         )
+
+
+@router.patch(
+    "/{job_id}",
+    response_model=VideoResultResponse,
+    summary="Переименовать видео",
+    responses={
+        400: {"description": "Пустое название"},
+        404: {"description": "Видео не найдено, не готово или уже удалено"},
+    },
+)
+async def rename_video(
+    job_id: UUID,
+    body: RenameVideoRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> VideoResultResponse:
+    """Переименование видео (ADR-012).
+
+    Owner-check по `Job` (owned + `job_type==video`) → иначе 404 VIDEO_NOT_FOUND;
+    затем резолв video-`Asset` (`kind=video`, `meta.job_id`, `deleted_at IS NULL`) —
+    нет ассета (не готово/удалено) → 404. `title` пишется реассайном словаря `meta`
+    (JSONB не мутируется in-place). Биллинг/`deleted_at` не трогает. Идемпотентно.
+    """
+    async with sessionmaker() as session:
+        async with session.begin():
+            job = await JobsRepository(session).get_by_id(job_id)
+            if (
+                job is None
+                or job.user_id != current.id
+                or job.job_type != JobType.video
+            ):
+                raise VideoNotFound()
+            stmt = (
+                select(Asset)
+                .where(Asset.user_id == current.id, Asset.kind == AssetKind.video)
+                .where(Asset.meta["job_id"].astext == str(job_id))
+                .where(Asset.deleted_at.is_(None))
+                .limit(1)
+            )
+            asset = (await session.execute(stmt)).scalars().first()
+            if asset is None:
+                raise VideoNotFound()
+            asset.meta = {**(asset.meta or {}), "title": body.title}
+            meta = asset.meta
+            return VideoResultResponse(
+                job_id=str(job.id),
+                status=job.status.value,
+                video_url=asset.url,
+                mode=meta.get("mode"),
+                aspect_ratio=meta.get("aspect_ratio"),
+                style=meta.get("style"),
+                title=meta.get("title"),
+                created_at=asset.created_at,
+            )
 
 
 @router.delete(

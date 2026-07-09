@@ -4,7 +4,13 @@ from datetime import datetime
 
 from pydantic import Field
 
-from app.schemas.common import CamelModel
+from app.schemas.common import CamelModel, StrippedNonEmpty
+
+
+class RenameVoiceRequest(CamelModel):
+    """Переименование профиля голоса (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."""
+
+    name: StrippedNonEmpty = Field(max_length=120, description="Новое имя профиля голоса.")
 
 
 class ConsentRequest(CamelModel):

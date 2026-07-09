@@ -59,10 +59,12 @@ async def library(
             ],
             videos=[
                 LibraryItem(
-                    id=str(v.id), type="video", url=v.url,
+                    id=str(job_id), type="video", title=(v.meta or {}).get("title"),
+                    url=v.url,
                     created_at=v.created_at.isoformat(),
                 )
                 for v in videos
+                if (job_id := (v.meta or {}).get("job_id")) is not None
             ],
             voices=[
                 LibraryItem(

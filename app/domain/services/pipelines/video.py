@@ -24,6 +24,7 @@ from app.domain.repositories.jobs import JobsRepository
 from app.domain.repositories.presets import PresetsRepository
 from app.domain.services.moderation_service import ModerationService
 from app.domain.services.pipelines.base import BasePipeline, CreditGate
+from app.domain.services.video_title import derive_video_title
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,7 @@ class VideoPipeline(BasePipeline):
                     "mode": payload.get("mode"),
                     "style": payload.get("style"),
                     "aspect_ratio": payload.get("aspect_ratio"),
+                    "title": derive_video_title(payload),
                 }
                 if quality_flag:
                     meta["quality_flag"] = quality_flag

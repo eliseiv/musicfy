@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.schemas.common import CamelModel
+from pydantic import Field
+
+from app.schemas.common import CamelModel, StrippedNonEmpty
+
+
+class RenameTrackRequest(CamelModel):
+    """Переименование трека (ADR-012). Пусто/пробелы → 400 INVALID_INPUT."""
+
+    title: StrippedNonEmpty = Field(max_length=255, description="Новое название трека.")
 
 
 class TrackVariantView(CamelModel):
