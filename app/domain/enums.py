@@ -117,6 +117,19 @@ class BillingProvider(str, Enum):
     apple = "apple"
 
 
+class StoreKitEnvironment(str, Enum):
+    """Окружение StoreKit-транзакции (claim `environment` верифицированного payload, ADR-013).
+
+    Значение НЕ приходит от клиента как самоаттестация: оно удостоверяется корнем цепочки x5c
+    (Apple Root CA - G3 → доверяем claim; пин StoreKit Test root → принудительно `Xcode`).
+    От него зависит область дедупа покупки (`BillingService._dedup_key`).
+    """
+
+    production = "Production"
+    sandbox = "Sandbox"
+    xcode = "Xcode"
+
+
 class ProductKind(str, Enum):
     subscription = "subscription"
     coin_pack = "coin_pack"

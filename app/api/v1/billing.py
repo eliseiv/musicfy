@@ -30,6 +30,15 @@ from app.domain.services.credits import CoinWalletService
 router = APIRouter(prefix="/billing", tags=["Биллинг"])
 
 
+def _apply_result(result: dict) -> ApplyResultResponse:
+    """Ответ применения транзакции. `reason` не теряется: status=rejected/ignored — не успех."""
+    return ApplyResultResponse(
+        status=result["status"],
+        deduplicated=result.get("deduplicated", False),
+        reason=result.get("reason"),
+    )
+
+
 @router.get("/balance", response_model=BalanceResponse, summary="Баланс монет")
 async def balance(
     current: Annotated[User, Depends(get_current_user)],
@@ -78,9 +87,7 @@ async def verify_purchase(
     result = await billing.verify_and_apply_transaction(
         user_id=current.id, signed_transaction=body.signed_transaction
     )
-    return ApplyResultResponse(
-        status=result["status"], deduplicated=result.get("deduplicated", False)
-    )
+    return _apply_result(result)
 
 
 @router.post("/restore", response_model=list[ApplyResultResponse], summary="Restore purchases")
@@ -94,9 +101,7 @@ async def restore(
         r = await billing.verify_and_apply_transaction(
             user_id=current.id, signed_transaction=signed
         )
-        results.append(
-            ApplyResultResponse(status=r["status"], deduplicated=r.get("deduplicated", False))
-        )
+        results.append(_apply_result(r))
     return results
 
 

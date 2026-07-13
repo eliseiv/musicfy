@@ -50,8 +50,19 @@ class RestoreRequest(CamelModel):
 
 
 class ApplyResultResponse(CamelModel):
+    """Результат применения StoreKit-транзакции.
+
+    `status`:
+      * `ok` — транзакция применена этому пользователю (`deduplicated=false` — монеты начислены
+        сейчас; `true` — были начислены ранее этим же чеком, повтор идемпотентен);
+      * `rejected` — транзакция НЕ применена (`reason`), монет нет. В частности
+        `transaction_already_claimed`: чек уже погашен другим аккаунтом (replay-защита, ADR-013);
+      * `ignored` — payload без эффекта (`reason`: `unknown_product` / `incomplete_transaction`).
+    """
+
     status: str
     deduplicated: bool = False
+    reason: str | None = None
 
 
 class LedgerEntryView(CamelModel):

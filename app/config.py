@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
@@ -16,6 +17,12 @@ _API_KEY_NAMESPACE = uuid.UUID("9c1d6f1a-2e44-4d0b-8a3c-7e1d2f4b6a90")
 # Легаси-дефолт видео-модели (kling lipsync). Используется для алиаса FAL_VIDEO_MODEL →
 # FAL_VIDEO_AVATAR_MODEL: старые конфиги, задающие FAL_VIDEO_MODEL, продолжают работать.
 _DEFAULT_VIDEO_AVATAR_MODEL = "fal-ai/kling-video/lipsync/audio-to-video"
+
+# Разбор конкатенированных PEM-блоков (APPLE_STOREKIT_TEST_ROOT_CERTS может содержать
+# несколько сертификатов подряд; переводы строк внутри env-значения допустимы).
+_PEM_CERT_RE = re.compile(
+    r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", re.DOTALL
+)
 
 
 class Settings(BaseSettings):
@@ -90,8 +97,13 @@ class Settings(BaseSettings):
     APPLE_STOREKIT_BUNDLE_ID: str = ""
     APPLE_STOREKIT_ENVIRONMENT: Literal["Sandbox", "Production"] = "Sandbox"
     # Проверять подпись JWS-транзакций (x5c → Apple Root CA - G3). В production — true.
-    # false только для dev/тестов с синтетическими токенами.
+    # false только для dev/тестов с синтетическими токенами; при APP_ENV=prod запрещено
+    # (fail-fast при старте, ADR-013 D3 / прецедент ADR-001).
     APPLE_STOREKIT_VERIFY_SIGNATURE: bool = True
+    # Пин корневых сертификатов Xcode StoreKit Test (ADR-013 D3): конкатенация PEM-блоков.
+    # Payload, чья x5c-цепочка приводит к одному из них, получает environment = Xcode
+    # (дедуп на пользователя + purchaseDate). Пустой дефолт → Xcode-ветка выключена.
+    APPLE_STOREKIT_TEST_ROOT_CERTS: str = ""
 
     # --- APNs ---
     APNS_ENABLED: bool = False
@@ -126,6 +138,22 @@ class Settings(BaseSettings):
         if isinstance(v, str) and v.strip() == "":
             return None
         return v
+
+    @model_validator(mode="after")
+    def _forbid_storekit_bypass_in_prod(self) -> Settings:
+        """Fail-fast: prod не поднимается с выключенной проверкой подписи StoreKit.
+
+        `APPLE_STOREKIT_VERIFY_SIGNATURE=false` означает приём неподписанных JWS — любой
+        аутентифицированный пользователь мог бы намайнить монеты самодельным токеном
+        (ADR-013 D3). Флаг легален только для APP_ENV ∈ {dev, test}.
+        """
+        if self.APP_ENV == "prod" and not self.APPLE_STOREKIT_VERIFY_SIGNATURE:
+            raise ValueError(
+                "APPLE_STOREKIT_VERIFY_SIGNATURE=false запрещён при APP_ENV=prod: "
+                "это приём неподписанных StoreKit-транзакций (ADR-013). "
+                "Установите APPLE_STOREKIT_VERIFY_SIGNATURE=true."
+            )
+        return self
 
     @model_validator(mode="after")
     def _apply_video_avatar_alias(self) -> Settings:
@@ -190,6 +218,15 @@ class Settings(BaseSettings):
     def apple_allowed_audiences(self) -> list[str]:
         raw = self.APPLE_ALLOWED_AUDIENCES or self.APPLE_BUNDLE_ID
         return [a.strip() for a in raw.split(",") if a.strip()]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def apple_storekit_test_root_certs(self) -> list[str]:
+        """PEM-блоки закреплённых StoreKit Test root-сертификатов (пусто → Xcode-ветка off)."""
+        return [
+            f"{m.group(0)}\n" if not m.group(0).endswith("\n") else m.group(0)
+            for m in _PEM_CERT_RE.finditer(self.APPLE_STOREKIT_TEST_ROOT_CERTS or "")
+        ]
 
     @computed_field  # type: ignore[prop-decorator]
     @property

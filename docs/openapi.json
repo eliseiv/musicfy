@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Musicfy API",
-    "description": "\nBackend приложения **Musicfy** — единый API над fal.ai для генерации музыки,\nAI-каверов, клонирования голоса и AI-видеоклипов.\n\n---\n\n## Авторизация\n\nВсе защищённые эндпоинты используют **Bearer-токен сессии**.\n\n1. Гость: `POST /v1/auth/guest` → вернёт `token`.\n2. Apple: `POST /v1/auth/apple` (с `identityToken`) → вернёт `token`; гостевые\n   данные автоматически переносятся в постоянный аккаунт.\n3. Передавайте токен в заголовке: `Authorization: Bearer <token>`.\n\nВ Swagger UI нажмите **Authorize** и вставьте токен.\n\n---\n\n## Жизненный цикл генерации (song / cover / video)\n\nГенерация — асинхронная. Ждать на экране не нужно.\n\n1. `POST /v1/songs` (или `/v1/covers`, `/v1/videos`) → **202** с `jobId`.\n2. Опрашивайте `GET /v1/jobs/{jobId}` — поле `status` проходит стадии:\n   `created → queued → running → post_processing → completed | failed | canceled`.\n   Поле `pipeline` показывает прогресс по стадиям.\n3. При `completed`:\n   - song/cover → `trackId` → `GET /v1/tracks/{trackId}` (массив `variants` с `audioUrl`).\n   - video → `GET /v1/videos/{jobId}` (`videoUrl`).\n4. По завершении долгих задач (видео) приходит push-уведомление (APNs).\n\n`lyrics` и клонирование голоса — синхронные (результат сразу в ответе).\n\n---\n\n## Монеты и подписка\n\nУ пользователя единый баланс **монет** (coins) — без деления на song/cover/video.\n\n- Каждая генерация стоит фиксированное число монет по прайс-листу\n  `GET /v1/billing/pricing`: **song = 10**, **cover = 5**, **video = 30**.\n  `lyrics` и `voice clone` бесплатны (монеты не тратят).\n- Текущий баланс: `GET /v1/billing/balance` (`coins_available`, `coins_reserved`).\n- Продукты (`GET /v1/billing/products`) — пакеты монет (`coin_pack`) и подписки;\n  оба начисляют монеты на единый баланс. Монеты копятся бессрочно и не сгорают.\n- Списание идёт по схеме **reserve → capture**: при создании задачи цена\n  резервируется, при успехе — списывается, при провале — возвращается\n  (release / refund).\n- При нехватке монет создание задачи вернёт **402 `INSUFFICIENT_CREDITS`** —\n  это сигнал показать paywall.\n- Покупки идемпотентны по `transaction_id` (повторный verify/restore не начислит\n  монеты дважды).\n\n---\n\n## Формат ошибок\n\nВсе 4xx/5xx ответы имеют единый вид:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"Not enough generation credits to perform the operation\",\n    \"details\": { \"required\": 10, \"available\": 3 }\n  },\n  \"requestId\": \"b5830b11dc4747d4b6b85217eff10177\"\n}\n```\n\nЧастые коды: `UNAUTHORIZED`, `INVALID_SESSION`, `INVALID_INPUT`,\n`SUBSCRIPTION_REQUIRED`, `INSUFFICIENT_CREDITS`, `CONSENT_REQUIRED`,\n`MODERATION_BLOCKED`, `JOB_NOT_FOUND`, `TRACK_NOT_FOUND`, `UPLOAD_REJECTED`,\n`PROVIDER_FAILED`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`.\n",
+    "description": "\nBackend приложения **Musicfy** — единый API над fal.ai для генерации музыки,\nAI-каверов, клонирования голоса и AI-видеоклипов.\n\n---\n\n## Авторизация\n\nВсе защищённые эндпоинты используют **Bearer-токен сессии**.\n\n1. Гость: `POST /v1/auth/guest` → вернёт `token`.\n2. Apple: `POST /v1/auth/apple` (с `identityToken`) → вернёт `token`; гостевые\n   данные автоматически переносятся в постоянный аккаунт.\n3. Передавайте токен в заголовке: `Authorization: Bearer <token>`.\n\nВ Swagger UI нажмите **Authorize** и вставьте токен.\n\n---\n\n## Жизненный цикл генерации (song / cover / video)\n\nГенерация — асинхронная. Ждать на экране не нужно.\n\n1. `POST /v1/songs` (или `/v1/covers`, `/v1/videos`) → **202** с `jobId`.\n2. Опрашивайте `GET /v1/jobs/{jobId}` — поле `status` проходит стадии:\n   `created → queued → running → post_processing → completed | failed | canceled`.\n   Поле `pipeline` показывает прогресс по стадиям.\n3. При `completed`:\n   - song/cover → `trackId` → `GET /v1/tracks/{trackId}` (массив `variants` с `audioUrl`).\n   - video → `GET /v1/videos/{jobId}` (`videoUrl`).\n4. По завершении долгих задач (видео) приходит push-уведомление (APNs).\n\n`lyrics` и клонирование голоса — синхронные (результат сразу в ответе).\n\n---\n\n## Монеты и подписка\n\nУ пользователя единый баланс **монет** (coins) — без деления на song/cover/video.\n\n- Каждая генерация стоит фиксированное число монет по прайс-листу\n  `GET /v1/billing/pricing`: **song = 10**, **cover = 5**, **video = 30**.\n  `lyrics` и `voice clone` бесплатны (монеты не тратят).\n- Текущий баланс: `GET /v1/billing/balance` (`coins_available`, `coins_reserved`).\n- Продукты (`GET /v1/billing/products`) — пакеты монет (`coin_pack`) и подписки;\n  оба начисляют монеты на единый баланс. Монеты копятся бессрочно и не сгорают.\n- Списание идёт по схеме **reserve → capture**: при создании задачи цена\n  резервируется, при успехе — списывается, при провале — возвращается\n  (release / refund).\n- При нехватке монет создание задачи вернёт **402 `INSUFFICIENT_CREDITS`** —\n  это сигнал показать paywall.\n- Покупки идемпотентны по дедуп-ключу транзакции (environment-scoped `dedup_key`,\n  ADR-013): повторный verify/restore **своего** чека не начислит монеты дважды;\n  replay **чужого** чека → `rejected` / `transaction_already_claimed`.\n\n---\n\n## Формат ошибок\n\nВсе 4xx/5xx ответы имеют единый вид:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"Not enough generation credits to perform the operation\",\n    \"details\": { \"required\": 10, \"available\": 3 }\n  },\n  \"requestId\": \"b5830b11dc4747d4b6b85217eff10177\"\n}\n```\n\nЧастые коды: `UNAUTHORIZED`, `INVALID_SESSION`, `INVALID_INPUT`,\n`SUBSCRIPTION_REQUIRED`, `INSUFFICIENT_CREDITS`, `CONSENT_REQUIRED`,\n`MODERATION_BLOCKED`, `JOB_NOT_FOUND`, `TRACK_NOT_FOUND`, `UPLOAD_REJECTED`,\n`PROVIDER_FAILED`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`.\n",
     "contact": {
       "name": "Musicfy Backend"
     },
@@ -2176,13 +2176,25 @@
             "type": "boolean",
             "title": "Deduplicated",
             "default": false
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "type": "object",
         "required": [
           "status"
         ],
-        "title": "ApplyResultResponse"
+        "title": "ApplyResultResponse",
+        "description": "Результат применения StoreKit-транзакции.\n\n`status`:\n  * `ok` — транзакция применена этому пользователю (`deduplicated=false` — монеты начислены\n    сейчас; `true` — были начислены ранее этим же чеком, повтор идемпотентен);\n  * `rejected` — транзакция НЕ применена (`reason`), монет нет. В частности\n    `transaction_already_claimed`: чек уже погашен другим аккаунтом (replay-защита, ADR-013);\n  * `ignored` — payload без эффекта (`reason`: `unknown_product` / `incomplete_transaction`)."
       },
       "AssetResponse": {
         "properties": {

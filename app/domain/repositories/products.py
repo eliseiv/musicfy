@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -34,9 +35,16 @@ class PurchasesRepository:
         product_external_id: str,
         transaction_id: str,
         original_transaction_id: str | None,
+        dedup_key: str,
+        environment: str,
+        purchase_date: datetime | None,
         raw: dict[str, Any] | None,
     ) -> bool:
-        """Записывает покупку. True — новая (False — уже была)."""
+        """Записывает покупку. True — новая (False — ключ `dedup_key` уже занят).
+
+        Дедуп идёт по `uq_purchases_dedup_key` (ADR-013 D2). False означает лишь, что ключ
+        занят — НЕ обязательно этим же пользователем; владельца отдаёт `find_owner_by_dedup_key`.
+        """
         stmt = (
             pg_insert(Purchase)
             .values(
@@ -44,13 +52,21 @@ class PurchasesRepository:
                 product_external_id=product_external_id,
                 transaction_id=transaction_id,
                 original_transaction_id=original_transaction_id,
+                dedup_key=dedup_key,
+                environment=environment,
+                purchase_date=purchase_date,
                 status="applied",
                 raw=raw,
             )
-            .on_conflict_do_nothing(constraint="uq_purchases_transaction_id")
+            .on_conflict_do_nothing(constraint="uq_purchases_dedup_key")
             .returning(Purchase.id)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def find_owner_by_dedup_key(self, dedup_key: str) -> UUID | None:
+        """Владелец уже применённой покупки с этим дедуп-ключом (для честного ответа при дедупе)."""
+        stmt = select(Purchase.user_id).where(Purchase.dedup_key == dedup_key).limit(1)
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def find_user_by_original_transaction(
         self, original_transaction_id: str

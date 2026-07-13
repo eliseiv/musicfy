@@ -172,12 +172,19 @@ class CreditLedgerEntry(Base):
 
 
 class Purchase(Base, TimestampMixin):
-    """StoreKit-транзакция (для restore и cross-device sync)."""
+    """StoreKit-транзакция (для restore и cross-device sync).
+
+    Дедуп — по `dedup_key` (ADR-013 D1/D2), а не по «голому» `transaction_id`:
+    `Production:{tx}` / `Sandbox:{tx}` — глобально (replay-защита боевых чеков),
+    `Xcode:{user}:{tx}:{purchase_date_ms}` — на пользователя (ID Xcode-тестов не уникальны).
+    `transaction_id` остаётся под НЕуникальным индексом (restore/саппорт).
+    """
 
     __tablename__ = "purchases"
     __table_args__ = (
-        UniqueConstraint("transaction_id", name="uq_purchases_transaction_id"),
+        UniqueConstraint("dedup_key", name="uq_purchases_dedup_key"),
         Index("ix_purchases_user_id", "user_id"),
+        Index("ix_purchases_transaction_id", "transaction_id"),
         Index("ix_purchases_original_transaction_id", "original_transaction_id"),
     )
 
@@ -191,6 +198,17 @@ class Purchase(Base, TimestampMixin):
     product_external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     transaction_id: Mapped[str] = mapped_column(String(255), nullable=False)
     original_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Верифицированное окружение транзакции (Production / Sandbox / Xcode). Отделяет тестовые
+    # начисления от боевых в аудите/выгрузках.
+    environment: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'Production'")
+    )
+    purchase_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Единственный источник истины дедупа: та же строка идёт в credit_ledger.idempotency_key
+    # как `purchase:{dedup_key}` — слои не могут разойтись.
+    dedup_key: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'applied'")
     )
