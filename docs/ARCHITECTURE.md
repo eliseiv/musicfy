@@ -425,12 +425,40 @@ Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notific
 - корень ∈ `APPLE_STOREKIT_TEST_ROOT_CERTS` (список PEM корневых сертификатов StoreKit Test,
   экспорт из Xcode разработчика; дефолт — **пустой**, т.е. ветка выключена) → `environment`
   принудительно `Xcode`;
+- **CN-trust за флагом** ([ADR-014](./adr/ADR-014-storekit-cn-trust-xcode-flag.md)): если
+  `APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS=true` **и** корень цепочки — self-signed EC-сертификат с
+  признаками Xcode-теста → `environment` принудительно `Xcode`, **без** пина по DER (см. ниже);
 - иначе → `WebhookPayloadInvalid` (`untrusted_root`).
 
 `APPLE_STOREKIT_VERIFY_SIGNATURE=false` легален только при `APP_ENV ∈ {dev, test}` (юнит-тесты с
 синтетическими токенами). `APP_ENV=prod` + `false` → **fail-fast при старте** (прецедент ADR-001):
 без проверки подписи любой аутентифицированный пользователь может подделать неподписанный JWS и
 намайнить монеты. Инвариант прода: флаг `true`.
+
+#### CN-trust Xcode тест-сертификатов за флагом ([ADR-014](./adr/ADR-014-storekit-cn-trust-xcode-flag.md))
+
+У каждой машины Xcode свой уникальный self-signed сертификат `CN="StoreKit Testing in Xcode"`
+(перевыпуск ~раз в год) → **другой DER** → пин по DER (ADR-013) не масштабируется на нескольких
+тестеров. Владелец осознанно решил на время **Testing-режима** (приложение ещё не в App Store)
+доверять любому такому сертификату по признакам, а не по пину.
+
+Флаг **`APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS`** (дефолт **`false`** — прод строгий, поведение
+ADR-013 без изменений). Когда `true` **и** `verify_signature=true`, `_verify_chain` доверяет
+корню цепочки (`certs[-1]`), если тот удовлетворяет **всем** признакам: `subject == issuer`
+(self-signed), `CN == "StoreKit Testing in Xcode"`, открытый ключ EC, собственная подпись
+сертификата валидна (криптографически self-signed), срок валиден. Тогда `environment := Xcode`
+(forced). Этот branch проверяется **после** Apple G3 и DER-пина, поэтому боевой Apple-путь
+(`Production`/`Sandbox`, глобальный namespace) и пин **не меняются**; CN-trust всегда форсит
+`Xcode` → per-user дедуп (`Xcode:{user_id}:{tx}:{purchase_date_ms}`).
+
+В отличие от `APPLE_STOREKIT_VERIFY_SIGNATURE`, этот флаг **легален в prod** (тестеры бьют по
+прод-бэкенду) — **fail-fast на него не вешается**. Защита — только дефолт `false` + обязательный
+pre-launch чеклист ([DEPLOYMENT.md §8](./DEPLOYMENT.md)).
+
+> **РИСК (принят явно):** при включённом флаге на проде **любой** может сгенерировать self-signed
+> EC-сертификат с этим CN и намайнить коины **бесплатно себе на аккаунт** (per-user; чужой баланс,
+> чужой чек и боевой namespace недостижимы). Приемлемо **только** в Testing-режиме до публичного
+> релиза. **Перед релизом флаг обязательно выключить и убрать DER-пины** (DEPLOYMENT.md §8).
 
 ### Дедупликация покупок ([ADR-013](./adr/ADR-013-storekit-dedup-environment-scoping.md) §D1, §D2)
 

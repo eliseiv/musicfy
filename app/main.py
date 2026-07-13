@@ -114,6 +114,7 @@ def create_app(
                 bundle_id=settings.APPLE_STOREKIT_BUNDLE_ID or settings.APPLE_BUNDLE_ID,
                 verify_signature=settings.APPLE_STOREKIT_VERIFY_SIGNATURE,
                 test_root_certs_pem=settings.apple_storekit_test_root_certs,
+                trust_xcode_test_certs=settings.APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS,
             ),
         )
 

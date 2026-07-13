@@ -201,6 +201,14 @@ github.event.workflow_run.head_sha }}` — на сервер уезжает ИМ
   включать пин тестового корня разработчика на проде для отладки покупок; это осознанный аудируемый
   акт (пин корня конкретной машины), а **перед реальным запуском корень удаляется**. Смена
   машины/Xcode → обновить env + редеплой ([TD-010](./100-known-tech-debt.md#td-010)).
+- **`APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS` (ADR-014, [Q-BILL-1](./99-open-questions.md#q-bill-1)):**
+  CN-trust Xcode тест-сертификатов за флагом. **Дефолт `false` = прод строгий** (поведение ADR-013).
+  `true` + `VERIFY_SIGNATURE=true` → доверять любому self-signed EC-сертификату с
+  `CN="StoreKit Testing in Xcode"` → `environment=Xcode` **без** пина по DER (масштабируется на
+  нескольких тестеров, где `APPLE_STOREKIT_TEST_ROOT_CERTS` не тянет из-за уникального DER машины).
+  **Флаг легален в prod (fail-fast НЕТ)** — тестеры бьют по прод-бэкенду. **РИСК:** при `true` любой
+  намайнит коины бесплатно себе (per-user; чужой баланс/боевой namespace недостижимы). Приемлемо
+  **только** в Testing-режиме. **Перед публичным релизом выключить** — см. §8.
 - В образ и репозиторий секреты не попадают: `.env` исключён из rsync и из git.
 
 ---
@@ -254,3 +262,30 @@ push в `main`) → deploy протестированного SHA. Сам деп
   `UVICORN_WORKERS`; дефолты `0.0.0.0` / `8000` / `1` соответствуют `expose: 8000` и labels Traefik.
 - **Healthcheck приложения:** `GET /healthz` (используется и в Dockerfile, и в compose,
   и в CI health gate, и в Traefik loadbalancer).
+
+---
+
+## 8. Pre-launch чеклист (перед публичным релизом в App Store)
+
+Пока приложение в **Testing-режиме** (не опубликовано), для отладки покупок у тестеров на проде
+включены послабления StoreKit-верификации. **Перед публичным релизом их обязательно снять** —
+иначе на боевом контуре останется сознательно принятая дыра «намайнить коины бесплатно себе»
+([ADR-014](./adr/ADR-014-storekit-cn-trust-xcode-flag.md), риск per-user). Чеклист (в `.env` на
+сервере + редеплой):
+
+- [ ] **`APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS=false`** (или удалить строку) — выключить CN-trust
+      Xcode-сертификатов ([ADR-014](./adr/ADR-014-storekit-cn-trust-xcode-flag.md)). Это главный
+      пункт: флаг легален в prod и **не** защищён fail-fast'ом, поэтому его никто не выключит
+      автоматически.
+- [ ] **`APPLE_STOREKIT_TEST_ROOT_CERTS=`** (пусто) — убрать DER-пины тестовых корней
+      ([ADR-013 §D3](./adr/ADR-013-storekit-dedup-environment-scoping.md), [TD-010](./100-known-tech-debt.md#td-010)).
+- [ ] **`APPLE_STOREKIT_VERIFY_SIGNATURE=true`** — подтвердить (инвариант ADR-013, защищён
+      fail-fast'ом; здесь — контрольная сверка).
+- [ ] **Зачистить тестовые начисления** `purchases.environment != 'Production'` (Xcode/Sandbox) +
+      компенсирующие ledger-записи перед финансовой отчётностью
+      ([TD-010](./100-known-tech-debt.md#td-010)).
+- [ ] **Редеплой** и проверка: Xcode-транзакция на проде теперь получает `untrusted_root` (ветка
+      выключена), Apple-подписанные `Production` — начисляются.
+
+После первых двух пунктов Xcode-ветка на проде полностью выключена — принимаются только
+Apple-подписанные `Production`/`Sandbox` (строгое боевое поведение).

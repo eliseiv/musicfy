@@ -35,6 +35,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.x509.oid import NameOID
 
 from app.api.errors import WebhookPayloadInvalid
 from app.domain.enums import StoreKitEnvironment
@@ -50,11 +51,13 @@ class AppleStoreKitVerifier:
         bundle_id: str = "",
         verify_signature: bool = True,
         test_root_certs_pem: Sequence[str] = (),
+        trust_xcode_test_certs: bool = False,
     ) -> None:
         self._bundle_id = bundle_id
         self._verify_signature = verify_signature
         self._root_der = apple_root_ca_g3_der()
         self._test_root_ders = _load_test_roots(test_root_certs_pem)
+        self._trust_xcode_test_certs = trust_xcode_test_certs
 
     # ------------------------------------------------------------------ public
 
@@ -168,12 +171,19 @@ class AppleStoreKitVerifier:
                 raise WebhookPayloadInvalid(details={"reason": "cert_expired"})
 
         # Trust anchor: Apple Root CA - G3 (боевой) либо закреплённый StoreKit Test root.
-        root_der = certs[-1].public_bytes(Encoding.DER)
+        root = certs[-1]
+        root_der = root.public_bytes(Encoding.DER)
         if root_der == self._root_der:
             forced_env: StoreKitEnvironment | None = None
         elif root_der in self._test_root_ders:
             forced_env = StoreKitEnvironment.xcode
             logger.info("storekit: payload signed by pinned StoreKit Test root → Xcode")
+        elif self._trust_xcode_test_certs and _is_xcode_test_root(root):
+            # CN-trust (ADR-014): доверяем ЛЮБОМУ Xcode-cert по признакам, без DER-пина.
+            # Гейтится флагом (по умолчанию off → прод строгий). Владение приватным ключом
+            # гарантирует проверка подписи JWS leaf-ключом (см. _verify_and_decode).
+            forced_env = StoreKitEnvironment.xcode
+            logger.info("storekit: payload signed by CN-trusted Xcode Test cert → Xcode")
         else:
             raise WebhookPayloadInvalid(details={"reason": "untrusted_root"})
 
@@ -189,6 +199,41 @@ class AppleStoreKitVerifier:
                 raise WebhookPayloadInvalid(details={"reason": "chain_invalid"}) from exc
 
         return certs[0], forced_env
+
+
+# CN, которым Xcode подписывает StoreKit Test cert'ы (subject == issuer, self-signed).
+_XCODE_TEST_CN = "StoreKit Testing in Xcode"
+
+
+def _is_xcode_test_root(cert: x509.Certificate) -> bool:
+    """Признаки self-signed Xcode StoreKit Test cert (ADR-014 §D3, CN-trust без DER-пина).
+
+    Все условия обязательны (AND):
+      - self-signed: subject == issuer;
+      - CN в subject == "StoreKit Testing in Xcode";
+      - публичный ключ — EC (ES256, как у боевых Apple leaf'ов);
+      - валидная собственная подпись cert (self-signature проверена его же публичным ключом).
+    Срок валидности проверяется отдельно выше (`cert_expired`). Self-signature обязательна:
+    она доказывает, что предъявитель владеет приватным ключом, соответствующим этому CN, —
+    CN-признаков без криптопроверки недостаточно.
+    """
+    if cert.subject != cert.issuer:
+        return False
+    cns = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    if not cns or cns[0].value != _XCODE_TEST_CN:
+        return False
+    pub = cert.public_key()
+    if not isinstance(pub, ec.EllipticCurvePublicKey):
+        return False
+    try:
+        pub.verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            ec.ECDSA(cert.signature_hash_algorithm),
+        )
+    except (InvalidSignature, ValueError, TypeError):
+        return False
+    return True
 
 
 def _load_test_roots(pem_certs: Sequence[str]) -> frozenset[bytes]:

@@ -18,3 +18,4 @@
 | [ADR-011](./ADR-011-user-resource-deletion.md) | Удаление пользовательских ресурсов (voices/tracks/videos): soft-delete | Accepted | 2026-07-08 |
 | [ADR-012](./ADR-012-user-resource-rename.md) | Переименование пользовательских ресурсов (tracks/voices/videos) + хранение title видео в meta | Accepted | 2026-07-09 |
 | [ADR-013](./ADR-013-storekit-dedup-environment-scoping.md) | Дедуп StoreKit-покупок: environment-scoped ключ + trust anchor вместо глобального bypass (дополняет ADR-005) | Accepted | 2026-07-13 |
+| [ADR-014](./ADR-014-storekit-cn-trust-xcode-flag.md) | CN-trust Xcode StoreKit Test сертификатов за флагом для Testing-режима (дополняет ADR-013) | Accepted | 2026-07-13 |

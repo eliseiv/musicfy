@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     # Payload, чья x5c-цепочка приводит к одному из них, получает environment = Xcode
     # (дедуп на пользователя + purchaseDate). Пустой дефолт → Xcode-ветка выключена.
     APPLE_STOREKIT_TEST_ROOT_CERTS: str = ""
+    # CN-trust для Xcode StoreKit Test cert'ов (ADR-014): доверять ЛЮБОМУ self-signed
+    # Xcode-cert по признакам (CN="StoreKit Testing in Xcode", self-signed, EC-ключ), а не
+    # по DER-пину. Нужен, когда приложение в Testing-режиме и у каждого тестера свой уникальный
+    # cert. По умолчанию ВЫКЛ — прод строгий (только Apple G3 / DER-пин). Владение приватным
+    # ключом гарантируется проверкой подписи JWS leaf-ключом.
+    APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS: bool = False
 
     # --- APNs ---
     APNS_ENABLED: bool = False
