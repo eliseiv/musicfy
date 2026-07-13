@@ -134,7 +134,11 @@ class AppleStoreKitVerifier:
         except jwt.PyJWTError as exc:
             raise WebhookPayloadInvalid(details={"reason": "bad_header"}) from exc
         x5c = header.get("x5c")
-        if not isinstance(x5c, list) or len(x5c) < 2:
+        # Боевая цепочка Apple = [leaf, intermediate, root]; Xcode StoreKit local testing
+        # подписывает ОДНИМ self-signed cert (x5c длины 1). Допускаем len>=1 — trust anchor
+        # всё равно обязан точно совпасть с пином (Apple Root G3 / StoreKit Test root)
+        # в `_verify_chain`, поэтому единичный cert не ослабляет боевую проверку (ADR-013).
+        if not isinstance(x5c, list) or not x5c:
             raise WebhookPayloadInvalid(details={"reason": "no_x5c"})
 
         leaf, forced_env = self._verify_chain(x5c)

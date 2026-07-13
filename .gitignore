@@ -82,3 +82,8 @@ Desktop.ini
 .claude/
 CLAUDE.md
 tz.txt
+
+# Сертификаты (StoreKit test root и пр.) — конфиг, не код; в репозиторий не входят
+*.cer
+*.pem
+*.der
