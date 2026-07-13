@@ -28,12 +28,13 @@ from app.domain.providers.billing.apple import AppleStoreKitVerifier
 from app.domain.services.billing_service import BillingService
 
 _REPO = Path(__file__).resolve().parents[1]
-_ALEMBIC = Path(sys.executable).with_name("alembic.exe")
 
 
 def _alembic(*args: str) -> None:
+    # Вызываем alembic как модуль тем же интерпретатором — кросс-платформенно
+    # (не зависит от имени бинарника alembic/alembic.exe, работает на Windows и Linux-CI).
     result = subprocess.run(
-        [str(_ALEMBIC), "-c", str(_REPO / "alembic.ini"), *args],
+        [sys.executable, "-m", "alembic", "-c", str(_REPO / "alembic.ini"), *args],
         cwd=str(_REPO),
         env=dict(os.environ),
         capture_output=True,
