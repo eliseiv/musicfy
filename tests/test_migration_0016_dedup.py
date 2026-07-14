@@ -64,7 +64,12 @@ async def test_migration_0016_roundtrip_and_no_double_grant():
     tx = "boevoy-777"
     p = {"u": user_id, "tx": tx}
 
-    # --- seed на head (0016): применённый боевой чек + посторонние ledger-потоки ---
+    # Пин схемы к ЯВНОЙ ревизии 0016 перед сидом — тест целится в границу 0016, а не в
+    # относительные -1/head (которые «съезжают» при добавлении миграций поверх 0016).
+    # На head это no-op (0016 уже применена); если БД ниже — доведёт ровно до 0016.
+    _alembic("upgrade", "0016_purchase_dedup_key")
+
+    # --- seed на 0016: применённый боевой чек + посторонние ledger-потоки ---
     engine = build_engine(get_settings())
     sessionmaker = build_sessionmaker(engine)
     async with sessionmaker() as session:
@@ -114,8 +119,10 @@ async def test_migration_0016_roundtrip_and_no_double_grant():
     await engine.dispose()
 
     try:
-        # --- downgrade 0016 -> 0015: ключ боевого гранта откатан к старому формату ---
-        _alembic("downgrade", "-1")
+        # --- downgrade через границу 0016 (к явной 0015): ключ боевого гранта откатан к
+        #     старому формату. Целимся в 0015_soft_delete, а не в -1: так 0016.downgrade
+        #     реально выполнится независимо от того, сколько миграций накатано поверх 0016. ---
+        _alembic("downgrade", "0015_soft_delete")
         after_down = await _scalar(
             "SELECT idempotency_key FROM credit_ledger "
             "WHERE ref_type='transaction' AND user_id=CAST(:u AS uuid)",
@@ -132,8 +139,10 @@ async def test_migration_0016_roundtrip_and_no_double_grant():
             == "lyrics:job-1"
         )
 
-        # --- upgrade 0015 -> 0016: backfill dedup_key + шаг 6 восстанавливает ключ ---
-        _alembic("upgrade", "head")
+        # --- upgrade 0015 -> 0016 (явная ревизия): backfill dedup_key + шаг 6 восстанавливает
+        #     ключ. Останавливаемся ровно на 0016, чтобы проверить именно её backfill; общий
+        #     возврат к head — в finally. ---
+        _alembic("upgrade", "0016_purchase_dedup_key")
         assert (
             await _scalar(
                 "SELECT dedup_key FROM purchases WHERE user_id=CAST(:u AS uuid)", p
