@@ -2,6 +2,10 @@
 
 - Статус: Accepted
 - Дата: 2026-07-06
+- **Уточнён [ADR-016](./ADR-016-video-generation-params-fix.md)** (2026-07-14): фикс параметров
+  видео-генерации — `style` подмешивается в prompt (у seedance нет поля style), `generate_audio=false`
+  для наших t2v/i2v-сабмитов (мы сами муксим трек), явный `resolution=720p` + кап битрейта/`+faststart`
+  в существующем re-encode (детерминированный размер < 80 МБ). Инварианты §3a/§3/§6 не изменены.
 - Контекст: видео-пайплайн (`app/domain/enums.py` (`VideoMode` — уже есть),
   `app/domain/schemas/videos.py`, `app/config.py`, `app/main.py`,
   `app/domain/providers/fal/{base,client,stub}.py`,

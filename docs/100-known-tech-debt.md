@@ -16,6 +16,38 @@
 | [TD-009](#td-009) | Дедуп самого драфта lyrics по Idempotency-Key не реализован — при ретрае с тем же ключом списания нет, но fal вызовется снова и создастся новый драфт; без ключа сетевой ретрай POST даёт двойное списание + двойную генерацию | low | open |
 | [TD-010](#td-010) | Xcode-ветка биллинга требует пина StoreKit Test root-сертификата разработчика (`APPLE_STOREKIT_TEST_ROOT_CERTS`) — ops-нагрузка при смене машины/Xcode | low | open |
 | [TD-011](#td-011) | `APPLE_STOREKIT_ENVIRONMENT` возможно мёртвая конфигурация после ADR-013 — подтвердить нужность server-to-server клиенту или удалить | low | open |
+| [TD-012](#td-012) | Avatar-выход видео (kling/sync-lipsync) не нормализуется — нет `+faststart`/капа размера (ADR-016 D3 фиксит только seedance-путь) | low | open |
+| [TD-013](#td-013) | Точный `aspect_ratio` для i2v/avatar не гарантируется — best-effort ffmpeg-кроп/пад под запрошенное соотношение отложен (ADR-016 D4) | low | open |
+
+---
+
+## TD-013 — Точный aspect_ratio для i2v/avatar: кроп/пад отложен {#td-013}
+
+**Контекст:** ADR-016 D4. `aspect_ratio` работает для t2v (visual_clip без референса). Для i2v
+(`referenceImageUrl`) и avatar/lipsync соотношение диктуется исходником — модель может вернуть не
+запрошенный aspect. В V1 фикса — молча best-effort (что отдала модель), без кропа.
+
+**Долг:** best-effort ffmpeg-кроп/пад результата под запрошенный `VideoAspect`
+(`scale=...:force_original_aspect_ratio` + `pad`/`crop`) на стадии re-encode. Отложено: доп.
+сложность фильтра + риск обрезать смысловой центр кадра; выгода частичная (только i2v/avatar).
+
+**Закрытие:** добавить кроп/пад в `video_mux` re-encode с учётом целевого aspect; проверить, что не
+ломает t2v-ветку (там aspect уже корректен от модели).
+
+## TD-012 — Avatar-выход видео не нормализуется (нет faststart/капа размера) {#td-012}
+
+**Контекст:** ADR-016 D3. visual_clip/lyrics_video проходят через ffmpeg re-encode
+(`_ffmpeg_mux_loop`/`_ffmpeg_render_lyrics`), где вшиты `+faststart` и кап битрейта. Avatar-режимы
+(lipsync/avatar-image) отдают **сырой** выход fal без re-encode → moov-атом может быть в конце файла
+(хуже прогрессивное воспроизведение в галерее iOS/Telegram), размер не капается.
+
+**Долг:** при подтверждённой проблеме на avatar-выходе — добавить лёгкую нормализацию (download →
+`ffmpeg -c copy -movflags +faststart` при совместимом кодеке, иначе re-encode с капом → upload) как
+стадию в `advance()` перед `_finalize` для avatar-ветки. Отложено: bug-репорт касается seedance
+(visual), avatar-выход kling/sync-lipsync обычно стандартный mp4; re-encode avatar — тяжёлая стадия.
+
+**Закрытие:** измерить реальный размер/структуру avatar-выхода; при необходимости — стадия
+`normalize_video` в `video_mux`, переиспользующая паттерн re-encode.
 
 ---
 

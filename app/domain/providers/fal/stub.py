@@ -120,17 +120,42 @@ class StubFalProvider:
         return self._submit("avatar-image")
 
     async def submit_text_to_video(
-        self, *, prompt, aspect_ratio, webhook_url, idempotency_key
+        self,
+        *,
+        prompt,
+        aspect_ratio,
+        webhook_url,
+        idempotency_key,
+        resolution=None,
+        generate_audio=False,
+        duration=None,
     ) -> FalSubmitResult:
         return self._submit("t2v")
 
     async def submit_lyrics_background(
-        self, *, prompt, aspect_ratio, webhook_url, idempotency_key
+        self,
+        *,
+        prompt,
+        aspect_ratio,
+        webhook_url,
+        idempotency_key,
+        resolution=None,
+        generate_audio=False,
+        duration=None,
     ) -> FalSubmitResult:
         return self._submit("lyrics-bg")
 
     async def submit_image_to_video(
-        self, *, prompt, image_url, aspect_ratio, webhook_url, idempotency_key
+        self,
+        *,
+        prompt,
+        image_url,
+        aspect_ratio,
+        webhook_url,
+        idempotency_key,
+        resolution=None,
+        generate_audio=False,
+        duration=None,
     ) -> FalSubmitResult:
         return self._submit("i2v")
 

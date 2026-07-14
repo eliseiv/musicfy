@@ -28,14 +28,29 @@ MAX_DOWNLOAD_MB = 200
 DEFAULT_DURATION_SECONDS = 30.0
 MAX_LYRIC_LINES = 200
 
-# Размеры фона lyrics-video по соотношению сторон (best-effort, [RISK-B3]).
+# Размеры канваса lyrics-video по соотношению сторон (720p-бокс, ADR-016 D3: не выше
+# 720p — короткая сторона 720, длинная ≤1280; совпадает с 720p-выходом seedance для 9:16).
 _ASPECT_TO_SIZE = {
-    "1:1": (1080, 1080),
-    "3:4": (1080, 1440),
-    "4:3": (1440, 1080),
-    "9:16": (1080, 1920),
+    "1:1": (720, 720),
+    "3:4": (720, 960),
+    "4:3": (960, 720),
+    "9:16": (720, 1280),
 }
-_DEFAULT_SIZE = (1080, 1920)
+_DEFAULT_SIZE = (720, 1280)
+
+# ADR-016 D3: единый H.264-профиль re-encode. Жёсткий кап битрейта → детерминированный
+# размер (<80МБ), high@4.0 yuv420p для совместимости, +faststart (moov в начало) —
+# обязательно для прогрессивного воспроизведения в галерее iOS и шаринга в Telegram.
+_VIDEO_ENCODE_ARGS = [
+    "-c:v", "libx264", "-profile:v", "high", "-level", "4.0", "-pix_fmt", "yuv420p",
+    "-crf", "26", "-maxrate", "2500k", "-bufsize", "5000k",
+    "-c:a", "aac", "-b:a", "128k",
+    "-movflags", "+faststart",
+]
+# 720p-бокс для scale-капа mux: min с исходной шириной → без апскейла; высота авто (чётная).
+# Вертикальный seedance 720x1280 остаётся как есть (ширина 720<1280), горизонтальный
+# 1920x1080 → 1280x720.
+_MUX_SCALE_720P = "scale='min(1280,iw)':-2"
 
 
 def ffmpeg_available() -> bool:
@@ -158,8 +173,8 @@ async def _ffmpeg_mux_loop(
         "-stream_loop", "-1", "-i", video_path,
         "-i", audio_path,
         "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        "-vf", _MUX_SCALE_720P,
+        *_VIDEO_ENCODE_ARGS,
         "-shortest",
     ]
     if audio_duration and audio_duration > 0:
@@ -206,8 +221,7 @@ async def _ffmpeg_render_lyrics(
     cmd += [
         "-map", "0:v", "-map", "1:a",
         "-vf", vf,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        *_VIDEO_ENCODE_ARGS,
         "-t", f"{duration:.3f}",
         "-shortest",
         output_path,

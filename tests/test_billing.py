@@ -47,18 +47,21 @@ async def test_pricing_lists_active_paid_types(client):
 
 @pytest.mark.asyncio
 async def test_products_return_coin_grants(client):
+    # После ADR-015 (миграция 0017) list_active отдаёт вербатим-каталог App Store Connect.
+    # Полное покрытие каталога — в tests/test_billing_catalog_reseed.py.
     resp = await client.get("/v1/billing/products")
     assert resp.status_code == 200
     products = {p["productId"]: p for p in resp.json()}
-    assert products["com.musicfy.coins.small"]["grants"] == {"coins": 100}
-    assert products["com.musicfy.coins.medium"]["grants"] == {"coins": 550}
-    assert products["com.musicfy.coins.large"]["grants"] == {"coins": 1200}
-    assert products["com.musicfy.coins.xl"]["grants"] == {"coins": 3000}
-    assert products["com.musicfy.coins.small"]["kind"] == "coin_pack"
-    weekly = products["com.musicfy.sub.weekly"]
-    assert weekly["grants"] == {"coins": 150}
+    assert products["100_tokens_9.99"]["grants"] == {"coins": 100}
+    assert products["500_tokens_34.99"]["grants"] == {"coins": 500}
+    assert products["2000_tokens_99.99"]["grants"] == {"coins": 2000}
+    assert products["100_tokens_9.99"]["kind"] == "coin_pack"
+    weekly = products["week_6.99_not_trial"]
+    assert weekly["grants"] == {"coins": 100}
     assert weekly["periodDays"] == 7
-    assert products["com.musicfy.sub.yearly"]["grants"] == {"coins": 8000}
+    assert products["yearly_49.99_not_trial"]["grants"] == {"coins": 1000}
+    # старый com.musicfy.* каталог из клиентского списка исчез (деактивирован)
+    assert not any(pid.startswith("com.musicfy.") for pid in products)
 
 
 # --------------------------------------------------------------------------

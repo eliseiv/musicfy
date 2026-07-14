@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # lyrics_video: генеративный t2v-фон fal, поверх которого бёрнится лирика (ADR-007 §3,
     # режим async — всегда в V1, поэтому дефолт не пустой; см. §3a).
     FAL_VIDEO_LYRICS_BG_MODEL: str = "bytedance/seedance-2.0/text-to-video"
+    # Разрешение t2v/i2v/lyrics-bg сабмитов seedance (ADR-016 D3). enum seedance
+    # {480p,720p,1080p,4k}; фиксируем 720p явно, чтобы не зависеть от смены дефолта
+    # провайдером. Слать всегда.
+    FAL_VIDEO_RESOLUTION: str = "720p"
+    # Опциональный кап длительности source-клипа (ADR-016 D3): enum-значение seedance
+    # {auto,4..15}, напр. "5". None → не слать (seedance auto). Контроль стоимости, не
+    # требование фикса (клип всё равно зацикливается под длину трека).
+    FAL_VIDEO_MAX_DURATION: str | None = None
 
     # --- App Store (StoreKit 2) ---
     APPLE_STOREKIT_ISSUER_ID: str = ""

@@ -383,13 +383,22 @@ class FalAiProvider:
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult:
-        # seedance-2.0/text-to-video: обязателен prompt; aspect_ratio опционален
-        # (enum "1:1"/"3:4"/"4:3"/"9:16"/... — совпадает с VideoAspect). Прочих полей
-        # не шлём (fal 422 на лишних). None-поля отфильтрованы.
-        payload: dict[str, Any] = {"prompt": prompt}
+        # seedance-2.0/text-to-video: обязателен prompt; aspect_ratio/resolution/duration
+        # опциональны (enum сверены с реальной схемой seedance-2.0, ADR-016 D5).
+        # aspect_ratio "1:1"/"3:4"/"4:3"/"9:16"/... совпадает с VideoAspect. generate_audio
+        # шлём всегда (=False из пайплайна: аудио муксим сами, ADR-016 D2). None-поля не
+        # отправляем (fal 422 на лишних).
+        payload: dict[str, Any] = {"prompt": prompt, "generate_audio": generate_audio}
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
+        if resolution:
+            payload["resolution"] = resolution
+        if duration:
+            payload["duration"] = duration
         return await self._submit(
             model=self._video_visual_model,
             payload=payload,
@@ -404,14 +413,22 @@ class FalAiProvider:
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult:
         # lyrics_video (ADR-007 §3/§3a): t2v-фон под бёрн-ин лирики. Отдельный submit-метод
         # (не submit_text_to_video), реально дёргающий FAL_VIDEO_LYRICS_BG_MODEL, чтобы
         # инвариант job.provider_model == вызванной модели держался даже при
-        # FAL_VIDEO_LYRICS_BG_MODEL != FAL_VIDEO_VISUAL_MODEL. Схема запроса идентична t2v.
-        payload: dict[str, Any] = {"prompt": prompt}
+        # FAL_VIDEO_LYRICS_BG_MODEL != FAL_VIDEO_VISUAL_MODEL. Схема запроса идентична t2v
+        # (resolution/generate_audio/duration — ADR-016 D5).
+        payload: dict[str, Any] = {"prompt": prompt, "generate_audio": generate_audio}
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
+        if resolution:
+            payload["resolution"] = resolution
+        if duration:
+            payload["duration"] = duration
         return await self._submit(
             model=self._video_lyrics_bg_model,
             payload=payload,
@@ -427,11 +444,23 @@ class FalAiProvider:
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult:
-        # seedance-2.0/image-to-video: обязательны prompt + image_url; aspect_ratio опц.
-        payload: dict[str, Any] = {"prompt": prompt, "image_url": image_url}
+        # seedance-2.0/image-to-video: обязательны prompt + image_url; aspect_ratio/
+        # resolution/duration опц.; generate_audio=False из пайплайна (ADR-016 D2/D5).
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "image_url": image_url,
+            "generate_audio": generate_audio,
+        }
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
+        if resolution:
+            payload["resolution"] = resolution
+        if duration:
+            payload["duration"] = duration
         return await self._submit(
             model=self._video_visual_image_model,
             payload=payload,

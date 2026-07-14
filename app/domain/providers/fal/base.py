@@ -172,6 +172,9 @@ class FalProvider(Protocol):
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult: ...
 
     async def submit_lyrics_background(
@@ -181,6 +184,9 @@ class FalProvider(Protocol):
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult: ...
 
     async def submit_image_to_video(
@@ -191,6 +197,9 @@ class FalProvider(Protocol):
         aspect_ratio: str | None,
         webhook_url: str | None,
         idempotency_key: str,
+        resolution: str | None = None,
+        generate_audio: bool = False,
+        duration: str | None = None,
     ) -> FalSubmitResult: ...
 
     # ----- storage / webhooks / polling -----

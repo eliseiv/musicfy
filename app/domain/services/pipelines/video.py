@@ -16,6 +16,7 @@ from app.domain.enums import (
     PresetKind,
     VideoAspect,
     VideoMode,
+    VideoStyle,
 )
 from app.domain.models.job import Job
 from app.domain.providers.fal.base import FalProvider
@@ -37,6 +38,36 @@ DEFAULT_LYRICS_BG_PROMPT = (
     "a soft abstract animated background for a lyrics video, gentle flowing gradients, "
     "subtle bokeh, cinematic ambient mood, no text"
 )
+
+# ADR-016 D1: у seedance нет поля style → стиль подмешивается в prompt детерминированным
+# server-side суффиксом (фиксированная константа, не пользовательский ввод → без повторной
+# модерации). Ключи = значения VideoStyle.
+STYLE_PROMPT_SUFFIX: dict[str, str] = {
+    VideoStyle.realistic.value: (
+        "photorealistic, natural lighting, realistic textures, lifelike detail"
+    ),
+    VideoStyle.cartoon.value: (
+        "cartoon style, vibrant flat colors, bold clean outlines, playful animation"
+    ),
+    VideoStyle.anime.value: (
+        "anime style, cel-shaded, expressive characters, detailed anime scenery"
+    ),
+    VideoStyle.cinematic.value: (
+        "cinematic, film grain, dramatic lighting, shallow depth of field, color-graded"
+    ),
+}
+
+
+def _apply_style(prompt: str, style: str | None) -> str:
+    """ADR-016 D1: добавить стилевой суффикс к prompt, если style задан и валиден.
+
+    Применяется ВСЕГДА (в т.ч. при явном prompt / surprise_me), иначе seedance стиль не
+    увидит. Неизвестный/пустой style → prompt без изменений.
+    """
+    suffix = STYLE_PROMPT_SUFFIX.get((style or "").strip())
+    if not suffix:
+        return prompt
+    return f"{prompt}, {suffix}"
 
 
 class VideoPipeline(BasePipeline):
@@ -136,9 +167,14 @@ class VideoPipeline(BasePipeline):
         self, job: Job, payload: dict[str, Any], audio_url: str
     ) -> None:
         prompt = await self._resolve_prompt(job, payload)
+        # ADR-016 D1: стиль подмешивается в prompt всегда (seedance не имеет поля style).
+        prompt = _apply_style(prompt, payload.get("style"))
         await self._record_stage(job.id, JobStage.prepare_prompt, "succeeded")
         reference_image_url = payload.get("reference_image_url")
         aspect_ratio = payload.get("aspect_ratio") or VideoAspect.vertical_9_16.value
+        # ADR-016 D3/D5: resolution всегда, duration — только если задан кап.
+        resolution = self._settings.FAL_VIDEO_RESOLUTION
+        duration = self._settings.FAL_VIDEO_MAX_DURATION
         await self._record_stage(job.id, JobStage.visual_gen, "running")
         try:
             if reference_image_url:
@@ -148,6 +184,9 @@ class VideoPipeline(BasePipeline):
                     aspect_ratio=aspect_ratio,
                     webhook_url=self._webhook_url(),
                     idempotency_key=f"{job.id}:visual",
+                    resolution=resolution,
+                    generate_audio=False,
+                    duration=duration,
                 )
             else:
                 submit = await self._fal.submit_text_to_video(
@@ -155,6 +194,9 @@ class VideoPipeline(BasePipeline):
                     aspect_ratio=aspect_ratio,
                     webhook_url=self._webhook_url(),
                     idempotency_key=f"{job.id}:visual",
+                    resolution=resolution,
+                    generate_audio=False,
+                    duration=duration,
                 )
         except (FalProviderError, FalTimeout) as exc:
             await self._record_stage(job.id, JobStage.visual_gen, "failed", error=str(exc))
@@ -177,6 +219,9 @@ class VideoPipeline(BasePipeline):
         # Пустая лирика → деградация (quality_flag) в advance, а не отказ запроса (ADR §3).
         await self._record_stage(job.id, JobStage.source_prep, "succeeded")
         aspect_ratio = payload.get("aspect_ratio") or VideoAspect.vertical_9_16.value
+        # ADR-016 D3/D5: resolution всегда, duration — только если задан кап.
+        resolution = self._settings.FAL_VIDEO_RESOLUTION
+        duration = self._settings.FAL_VIDEO_MAX_DURATION
 
         await self._record_stage(job.id, JobStage.visual_gen, "running")
         try:
@@ -187,6 +232,9 @@ class VideoPipeline(BasePipeline):
                 aspect_ratio=aspect_ratio,
                 webhook_url=self._webhook_url(),
                 idempotency_key=f"{job.id}:lyrics_bg",
+                resolution=resolution,
+                generate_audio=False,
+                duration=duration,
             )
         except (FalProviderError, FalTimeout) as exc:
             await self._record_stage(
@@ -198,14 +246,13 @@ class VideoPipeline(BasePipeline):
         )
 
     def _lyrics_bg_prompt(self, payload: dict[str, Any]) -> str:
-        """Промпт t2v-фона под бёрн-ин лирики: явный prompt или дефолт по стилю (дёшево)."""
-        prompt = (payload.get("prompt") or "").strip()
-        if prompt:
-            return prompt
-        style = (payload.get("style") or "").strip()
-        if style:
-            return f"{DEFAULT_LYRICS_BG_PROMPT}, {style} style"
-        return DEFAULT_LYRICS_BG_PROMPT
+        """Промпт t2v-фона под бёрн-ин лирики: явный prompt или дефолт + стилевой суффикс.
+
+        ADR-016 D1: стилевой суффикс применяется ВСЕГДА (и при явном prompt) через общий
+        `_apply_style`, а не только при пустом prompt.
+        """
+        prompt = (payload.get("prompt") or "").strip() or DEFAULT_LYRICS_BG_PROMPT
+        return _apply_style(prompt, payload.get("style"))
 
     # ---- surprise-me / prompt ----
 
