@@ -21,3 +21,4 @@
 | [ADR-014](./ADR-014-storekit-cn-trust-xcode-flag.md) | CN-trust Xcode StoreKit Test сертификатов за флагом для Testing-режима (дополняет ADR-013) | Accepted | 2026-07-13 |
 | [ADR-015](./ADR-015-product-catalog-verbatim-reseed.md) | Замена каталога продуктов на вербатим-каталог App Store Connect (деактивация старых, миграция 0017) | Accepted | 2026-07-14 |
 | [ADR-016](./ADR-016-video-generation-params-fix.md) | Фикс параметров видео-генерации: style→prompt, generate_audio=false, resolution/размер (уточняет ADR-007) | Accepted | 2026-07-14 |
+| [ADR-017](./ADR-017-subscription-transfer-on-reinstall.md) | Перенос подписки при переустановке: entitlement следует за Apple ID (дополняет ADR-013) | Accepted | 2026-07-23 |

@@ -3,11 +3,16 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.enums import CreditCategory, CreditLedgerKind, CreditSource
+from app.domain.enums import (
+    CreditCategory,
+    CreditLedgerKind,
+    CreditSource,
+    SubscriptionStatus,
+)
 from app.domain.models.billing import (
     CoinWallet,
     CreditLedgerEntry,
@@ -113,6 +118,25 @@ class CreditsRepository:
     async def get_subscription(self, user_id: UUID) -> SubscriptionState | None:
         stmt = select(SubscriptionState).where(SubscriptionState.user_id == user_id)
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def expire_foreign_subscriptions(
+        self, *, original_transaction_id: str, except_user_id: UUID
+    ) -> int:
+        """Гасит активные подписки ДРУГИХ пользователей на ту же Apple-цепочку.
+
+        Одна подписка Apple ID (`original_transaction_id`) — один активный владелец:
+        при переносе entitlement прежний владелец теряет статус `active` (→ `expired`).
+        """
+        stmt = (
+            update(SubscriptionState)
+            .where(
+                SubscriptionState.original_transaction_id == original_transaction_id,
+                SubscriptionState.user_id != except_user_id,
+                SubscriptionState.status == SubscriptionStatus.active,
+            )
+            .values(status=SubscriptionStatus.expired)
+        )
+        return (await self._session.execute(stmt)).rowcount
 
     async def upsert_subscription(self, *, user_id: UUID, values: dict[str, Any]) -> None:
         stmt = pg_insert(SubscriptionState).values(user_id=user_id, **values)

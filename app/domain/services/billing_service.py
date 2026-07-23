@@ -116,10 +116,40 @@ class BillingService:
                 credits = CreditsRepository(session)
 
                 if not newly:
-                    # Ключ занят. Если владелец — другой пользователь, это применение чужого
-                    # чека: монет не будет, и ответ обязан это показать (не "ok").
+                    # Ключ занят. Если владелец — другой пользователь, есть два случая:
+                    # подписка (ADR-017) — entitlement следует за Apple ID (валидный JWS
+                    # может предъявить только устройство, залогиненное в купивший App Store
+                    # аккаунт), поэтому цепочка переезжает на текущего пользователя; это
+                    # штатный сценарий переустановки с guest-аккаунтами. Коин-пак — replay
+                    # чужого чека: монет не будет, и ответ обязан это показать (не "ok").
                     owner = await purchases.find_owner_by_dedup_key(dedup_key)
                     if owner != user_id:
+                        if (
+                            is_subscription
+                            and environment is not StoreKitEnvironment.xcode
+                        ):
+                            logger.info(
+                                "billing: subscription transferred to new owner: "
+                                "environment=%s transaction=%s from_user=%s to_user=%s",
+                                environment.value,
+                                tx["transaction_id"],
+                                owner,
+                                user_id,
+                            )
+                            await self._transfer_subscription_chain(
+                                purchases, credits,
+                                user_id=user_id, tx=tx, environment=environment,
+                            )
+                            await self._update_subscription_state(
+                                credits, user_id, product, tx
+                            )
+                            # Монеты НЕ переначисляются: ledger-ключ `purchase:{dedup_key}`
+                            # уже погашен прежним владельцем (иначе reinstall = фарм монет).
+                            return {
+                                "status": "ok",
+                                "deduplicated": True,
+                                "reason": "subscription_transferred",
+                            }
                         logger.warning(
                             "billing: transaction claimed by another user: "
                             "environment=%s transaction=%s",
@@ -138,6 +168,15 @@ class BillingService:
                     return {"status": "ok", "deduplicated": True}
 
                 if is_subscription:
+                    # Новая транзакция той же Apple-цепочки (resubscribe/renewal после
+                    # переустановки): entitlement и история цепочки переезжают к текущему
+                    # пользователю, прежний владелец гасится (ADR-017). Для первой покупки
+                    # оба апдейта — no-op (нет чужих строк с этим original_transaction_id).
+                    if environment is not StoreKitEnvironment.xcode:
+                        await self._transfer_subscription_chain(
+                            purchases, credits,
+                            user_id=user_id, tx=tx, environment=environment,
+                        )
                     await self._update_subscription_state(credits, user_id, product, tx)
                 # Монеты — ТОЛЬКО при реально вставленной строке purchases (ADR-013 D2).
                 await self._grant_coins(
@@ -149,6 +188,35 @@ class BillingService:
                     is_subscription=is_subscription,
                 )
         return {"status": "ok", "deduplicated": False}
+
+    async def _transfer_subscription_chain(
+        self,
+        purchases: PurchasesRepository,
+        credits: CreditsRepository,
+        *,
+        user_id: UUID,
+        tx: dict,
+        environment: StoreKitEnvironment,
+    ) -> None:
+        """Перенос подписочной цепочки на текущего пользователя (ADR-017).
+
+        Guest-модель создаёт нового пользователя на каждую установку, поэтому после
+        переустановки чек активной подписки «принадлежит» брошенному аккаунту. Владение
+        следует за Apple ID: покупки цепочки переезжают (webhooks находят актуального
+        владельца по `original_transaction_id`), подписка прежнего владельца гасится.
+
+        Только Production/Sandbox: Xcode-ID не уникальны между пользователями — перенос
+        по ним отдал бы чужие тестовые покупки (вызывающий отсекает Xcode до вызова).
+        """
+        otid = tx.get("original_transaction_id") or tx["transaction_id"]
+        await purchases.reassign_original_transaction(
+            original_transaction_id=otid,
+            environment=environment.value,
+            new_user_id=user_id,
+        )
+        await credits.expire_foreign_subscriptions(
+            original_transaction_id=otid, except_user_id=user_id
+        )
 
     async def _update_subscription_state(
         self, credits: CreditsRepository, user_id: UUID, product: Product, tx: dict

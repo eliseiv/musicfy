@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,27 @@ class PurchasesRepository:
         """Владелец уже применённой покупки с этим дедуп-ключом (для честного ответа при дедупе)."""
         stmt = select(Purchase.user_id).where(Purchase.dedup_key == dedup_key).limit(1)
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def reassign_original_transaction(
+        self, *, original_transaction_id: str, environment: str, new_user_id: UUID
+    ) -> int:
+        """Переносит покупки цепочки `original_transaction_id` на нового владельца.
+
+        Область — одно окружение (`environment`): Apple гарантирует уникальность ID только
+        внутри него, а Xcode-ID вообще не уникальны (вызывающий обязан отсечь Xcode сам).
+        После переноса webhooks (`find_user_by_original_transaction`) находят актуального
+        владельца. Строки `credit_ledger` не трогаем: леджер — исторический факт начисления.
+        """
+        stmt = (
+            update(Purchase)
+            .where(
+                Purchase.original_transaction_id == original_transaction_id,
+                Purchase.environment == environment,
+                Purchase.user_id != new_user_id,
+            )
+            .values(user_id=new_user_id)
+        )
+        return (await self._session.execute(stmt)).rowcount
 
     async def find_user_by_original_transaction(
         self, original_transaction_id: str

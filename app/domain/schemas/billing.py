@@ -54,9 +54,12 @@ class ApplyResultResponse(CamelModel):
 
     `status`:
       * `ok` — транзакция применена этому пользователю (`deduplicated=false` — монеты начислены
-        сейчас; `true` — были начислены ранее этим же чеком, повтор идемпотентен);
+        сейчас; `true` — были начислены ранее этим же чеком, повтор идемпотентен). Особый случай
+        `reason=subscription_transferred`: подписка переехала с прежнего (брошенного при
+        переустановке) аккаунта — entitlement активен, монеты не переначислялись (ADR-017);
       * `rejected` — транзакция НЕ применена (`reason`), монет нет. В частности
-        `transaction_already_claimed`: чек уже погашен другим аккаунтом (replay-защита, ADR-013);
+        `transaction_already_claimed`: коин-пак уже погашен другим аккаунтом (replay-защита,
+        ADR-013; для подписок с ADR-017 это переносится, а не отклоняется);
       * `ignored` — payload без эффекта (`reason`: `unknown_product` / `incomplete_transaction`).
     """
 
