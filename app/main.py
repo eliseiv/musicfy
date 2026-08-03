@@ -20,6 +20,7 @@ from app.domain.services.analytics_service import AnalyticsService
 from app.domain.services.asset_service import AssetService
 from app.domain.services.billing_service import BillingService
 from app.domain.services.credits import CoinWalletService
+from app.domain.services.crm_admin_service import CrmAdminService
 from app.domain.services.generation_service import GenerationService
 from app.domain.services.lyrics_service import LyricsService
 from app.domain.services.merge import register as register_merge_reassigners
@@ -125,6 +126,7 @@ def create_app(
         app.state.moderation_service = moderation
         app.state.analytics_service = analytics
         app.state.admin_service = AdminService(app.state.sessionmaker)
+        app.state.crm_admin_service = CrmAdminService(app.state.sessionmaker)
 
         # Pipeline / generation.
         poller = None
@@ -228,6 +230,10 @@ def create_app(
 
     @app.get("/healthz", tags=["Система"], summary="Healthcheck")
     async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/health", tags=["Система"], summary="Healthcheck (CRM alias)")
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     return app

@@ -117,21 +117,33 @@ def get_admin_service(request: Request):
     return svc
 
 
+def get_crm_admin_service(request: Request):
+    svc = getattr(request.app.state, "crm_admin_service", None)
+    if svc is None:
+        raise RuntimeError("CRM admin service is not configured")
+    return svc
+
+
 def require_admin(
     request: Request,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Security(admin_scheme)
     ] = None,
 ) -> None:
-    """Доступ к админ-эндпоинтам по выделенному ключу (Bearer = ADMIN_API_KEY)."""
+    """Доступ к админ-эндпоинтам по X-Admin-Key (CRM) или Bearer = ADMIN_API_KEY (legacy)."""
     settings: Settings = request.app.state.settings
-    token = credentials.credentials.strip() if credentials else None
-    if (
-        not settings.ADMIN_API_KEY
-        or not token
-        or not hmac.compare_digest(token, settings.ADMIN_API_KEY)
-    ):
+    if not settings.ADMIN_API_KEY:
+        raise AuthError(message="Admin API key not configured")
+
+    header_key = request.headers.get("X-Admin-Key")
+    bearer_key = credentials.credentials.strip() if credentials else None
+    token = (header_key or bearer_key or "").strip()
+
+    if not token:
         raise Forbidden(message="Admin access required")
+
+    if not hmac.compare_digest(token, settings.ADMIN_API_KEY):
+        raise AuthError(message="Invalid admin API key")
 
 
 async def get_current_user(

@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from app.api.errors import ValidationFailed
+from app.api.v1 import crm_admin
 from app.deps import get_admin_service, get_credits_service, require_admin
 from app.domain.enums import JobType
 from app.domain.schemas.admin import (
@@ -23,6 +24,8 @@ router = APIRouter(
     tags=["Админ"],
     dependencies=[Depends(require_admin)],
 )
+
+router.include_router(crm_admin.router)
 
 
 async def _balance_response(
@@ -76,9 +79,9 @@ async def admin_grant_credits(
 
 
 @router.post(
-    "/users/{user_id}/subscription",
+    "/users/{user_id}/subscription/legacy",
     response_model=AdminBalanceResponse,
-    summary="Выдать подписку (начислить монеты)",
+    summary="Выдать подписку (legacy, начислить монеты)",
 )
 async def admin_grant_subscription(
     user_id: UUID,

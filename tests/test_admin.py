@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-ADMIN = {"Authorization": "Bearer test-admin-key"}
+ADMIN = {"X-Admin-Key": "test-admin-key"}
+ADMIN_BEARER = {"Authorization": "Bearer test-admin-key"}
 
 
 async def _guest(client) -> tuple[str, dict]:
@@ -18,19 +19,19 @@ async def test_admin_requires_admin_key(client):
         f"/v1/admin/users/{user_id}/credits", json={"coins": 5}
     )
     assert resp.status_code in (401, 403)
-    # с пользовательским токеном (не админским) — тоже отказ
+    # с пользовательским токеном (не админским) — отказ
     _, uh = await _guest(client)
     resp2 = await client.post(
         f"/v1/admin/users/{user_id}/credits", json={"coins": 5}, headers=uh
     )
-    assert resp2.status_code == 403
+    assert resp2.status_code == 401
     # обычный сервисный API_KEY НЕ даёт админ-доступ (ключи разделены)
     resp3 = await client.post(
         f"/v1/admin/users/{user_id}/credits",
         json={"coins": 5},
         headers={"Authorization": "Bearer test-service-key"},
     )
-    assert resp3.status_code == 403
+    assert resp3.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -54,7 +55,7 @@ async def test_admin_grant_credits(client):
 async def test_admin_grant_subscription_credits_coins(client):
     user_id, uh = await _guest(client)
     resp = await client.post(
-        f"/v1/admin/users/{user_id}/subscription",
+        f"/v1/admin/users/{user_id}/subscription/legacy",
         json={"coins": 150, "periodDays": 7, "label": "weekly"},
         headers=ADMIN,
     )
@@ -93,7 +94,7 @@ async def test_admin_revoke_subscription_keeps_coins(client):
     """Монеты non-expiring: revoke меняет статус, но монеты не сгорают."""
     user_id, uh = await _guest(client)
     await client.post(
-        f"/v1/admin/users/{user_id}/subscription",
+        f"/v1/admin/users/{user_id}/subscription/legacy",
         json={"coins": 150, "periodDays": 7}, headers=ADMIN,
     )
     revoke = await client.request(

@@ -93,6 +93,14 @@ class CreditsRepository:
         await self._session.execute(stmt)
         return True
 
+    async def idempotency_exists(self, idempotency_key: str) -> bool:
+        stmt = (
+            select(CreditLedgerEntry.id)
+            .where(CreditLedgerEntry.idempotency_key == idempotency_key)
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
     async def list_ledger(
         self, *, user_id: UUID, limit: int = 100, offset: int = 0
     ) -> list[CreditLedgerEntry]:
