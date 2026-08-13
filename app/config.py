@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     FAL_REFINE_MODEL: str = "fal-ai/ace-step/audio-to-audio"
     FAL_SPEECH_MODEL: str = "fal-ai/minimax/speech-02-turbo"
     FAL_VOICE_CLONE_MODEL: str = "fal-ai/minimax/voice-clone"
-    FAL_LYRICS_LLM: str = "anthropic/claude-3-5-haiku"
+    FAL_LYRICS_LLM: str = "anthropic/claude-haiku-4.5"
     FAL_DEMUCS_MODEL: str = "fal-ai/demucs"
     FAL_VOICE_CHANGER_MODEL: str = "fal-ai/elevenlabs/voice-changer"
     # Конвертация клон-голоса в cover (ADR-009): audio-to-audio с образцом голоса как
