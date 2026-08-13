@@ -1,7 +1,16 @@
-# Production compose для musicfy.
+# Production compose для musicfy (мульти-инстанс).
 # Запускается за общим reverse-proxy Traefik (/opt/edge, сеть web external).
 # Никаких host-портов: TLS/80/443 терминирует Traefik, маршрут — через labels.
-# Запуск: docker compose -f docker-compose.prod.yml up -d --build
+#
+# Параметры инстанса (из .env, с дефолтами первого инстанса):
+#   COMPOSE_PROJECT_NAME  — имя docker-compose project / Traefik router (default: musicfy)
+#   SERVICE_DOMAIN        — публичный домен Host() (default: zavionix.shop)
+#
+# Запуск инстанса:
+#   docker compose -p <proj> -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# Первый инстанс: /opt/musicfy  → zavionix.shop  (COMPOSE_PROJECT_NAME=musicfy)
+# Клон:          /opt/norqelia → norqelia.shop  (COMPOSE_PROJECT_NAME=norqelia)
 services:
   postgres:
     image: postgres:16-alpine
@@ -22,6 +31,7 @@ services:
 
   api:
     build: .
+    image: ${COMPOSE_PROJECT_NAME:-musicfy}-api:prod
     restart: unless-stopped
     env_file: .env
     environment:
@@ -42,10 +52,14 @@ services:
       - default
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.musicfy.rule=Host(`zavionix.shop`) || Host(`www.zavionix.shop`)"
-      - "traefik.http.routers.musicfy.entrypoints=websecure"
-      - "traefik.http.routers.musicfy.tls.certresolver=le"
-      - "traefik.http.services.musicfy.loadbalancer.server.port=8000"
+      - "traefik.docker.network=web"
+      # Уникальный router/service на инстанс: ${COMPOSE_PROJECT_NAME}.
+      # Host — из SERVICE_DOMAIN (+ www-алиас для обратной совместимости с zavionix).
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-musicfy}.rule=Host(`${SERVICE_DOMAIN:-zavionix.shop}`) || Host(`www.${SERVICE_DOMAIN:-zavionix.shop}`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-musicfy}.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-musicfy}.tls=true"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-musicfy}.tls.certresolver=le"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-musicfy}.loadbalancer.server.port=8000"
 
 networks:
   web:

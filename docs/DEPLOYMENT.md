@@ -157,19 +157,28 @@ github.event.workflow_run.head_sha }}` — на сервер уезжает ИМ
 2. **Setup SSH key** — приватный ключ из `SSH_PRIVATE_KEY` пишется в `~/.ssh/deploy_key`
    (chmod 600), `known_hosts` из `SSH_KNOWN_HOSTS` (chmod 644). Используется
    `StrictHostKeyChecking=yes` — host сервера должен совпадать с записью в `SSH_KNOWN_HOSTS`.
-3. **Rsync project to server** — `rsync -az --delete` рабочего дерева в
-   `${SSH_USER}@${SSH_HOST}:/opt/musicfy/`. Исключаются: `.git`, `.env`, `.venv`,
-   `__pycache__`, `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.coverage`, `.idea`.
-   `--delete` означает, что серверный каталог приводится к состоянию репозитория
-   (см. §6 — запрет хранить там не-`.env` файлы).
-4. **Deploy on server** — по SSH:
-   - идемпотентно создать сеть `web`, если её нет;
-   - `docker compose -f docker-compose.prod.yml up -d --build`;
-   - **health gate:** до ~120 с (24 попытки × 5 с) ждать `State.Health.Status == healthy`
-     у `musicfy-api-1`. Если api не стал healthy — деплой падает (`exit 1`), старый образ
-     остаётся (см. §5 rollback);
-   - `docker image prune -f` — **только после** подтверждения health (обоснование — ADR-003).
+3. **Ensure shared Traefik network** — идемпотентно создать сеть `web`, если её нет.
+4. **Rsync + deploy all instances** — для каждой пары `dir:project` из `$INSTANCES`:
+   - проверить, что `/opt/<dir>` и `/opt/<dir>/.env` существуют (провижининг — ручной);
+   - `rsync -az --delete` рабочего дерева в `/opt/<dir>/` (исключения: `.git`, `.env`,
+     `.venv`, `__pycache__`, `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.coverage`, `.idea`);
+   - `docker compose -p <project> -f docker-compose.prod.yml --env-file .env up -d --build`;
+   - **health gate:** до ~120 с ждать `State.Health.Status == healthy` у `<project>-api-1`.
+     Если api не стал healthy — деплой падает (`exit 1`), старый образ остаётся (см. §5);
+   - после успеха всех инстансов — `docker image prune -f` (обоснование — ADR-003).
 5. **Cleanup SSH key** — `if: always()`, удаляет `~/.ssh/deploy_key`.
+
+### INSTANCES-loop (мульти-инстанс)
+
+Переменная `INSTANCES` в `deploy.yml` — список пар `dir:project`:
+
+| dir | project | домен | каталог |
+|---|---|---|---|
+| `musicfy` | `musicfy` | `zavionix.shop` | `/opt/musicfy` |
+| `norqelia` | `norqelia` | `norqelia.shop` | `/opt/norqelia` |
+
+Новый инстанс добавляется в `$INSTANCES` **только после** ручного провижининга и
+`GET https://<домен>/healthz → 200` (см. §Мульти-инстанс ниже).
 
 ### GitHub Secrets (заводит владелец репозитория)
 
@@ -289,3 +298,75 @@ push в `main`) → deploy протестированного SHA. Сам деп
 
 После первых двух пунктов Xcode-ветка на проде полностью выключена — принимаются только
 Apple-подписанные `Production`/`Sandbox` (строгое боевое поведение).
+
+---
+
+## 9. Мульти-инстанс / клонирование
+
+Модель как у claude-ios: один репозиторий, несколько каталогов `/opt/<dir>` на общем
+сервере за общим Traefik. Каждый инстанс — полный стек `api + postgres` с префиксом
+compose-project `<project>`, свой volume `pgdata`, свой `.env`. Общее — только сеть `web`
+и edge Traefik (`/opt/edge`).
+
+### Параметры compose
+
+| переменная | назначение | дефолт (первый инстанс) |
+|---|---|---|
+| `COMPOSE_PROJECT_NAME` | имя project / Traefik router / image tag | `musicfy` |
+| `SERVICE_DOMAIN` | `Host()` (+ `www.`-алиас) | `zavionix.shop` |
+| `PUBLIC_BASE_URL` | публичный HTTPS URL (fal webhooks) | `https://zavionix.shop` |
+| `POSTGRES_PASSWORD` | пароль БД инстанса (уникальный) | — (обязателен) |
+| `API_KEY` / `ADMIN_API_KEY` | сервисный / админ-ключ (уникальные) | — |
+| `FAL_WEBHOOK_SECRET` | HMAC webhook fal (уникальный) | — |
+
+`FAL_API_KEY` можно разделять между инстансами (как Anthropic-ключ у claude-ios).
+Apple/StoreKit/APNs — per-instance (свой bundle id / ключи).
+
+### Процедура провижининга клона
+
+Шаги 1–8 **без** записи в CI; шаг 9 — только после `healthz 200`.
+
+1. **DNS:** A-запись `<домен>` → `87.239.135.154` (до старта, для ACME).
+2. **Код:** скопировать дерево первого инстанса (или rsync с runner), например:
+   ```bash
+   mkdir -p /opt/<dir>
+   rsync -a --exclude='.env' --exclude='.git' /opt/musicfy/ /opt/<dir>/
+   ```
+3. **`.env`:** свежий файл (не копировать целиком чужой). Обязательно:
+   ```
+   APP_ENV=prod
+   COMPOSE_PROJECT_NAME=<dir>
+   SERVICE_DOMAIN=<домен>
+   PUBLIC_BASE_URL=https://<домен>
+   POSTGRES_PASSWORD=<openssl rand -hex 32>
+   API_KEY=<openssl rand -hex 32>
+   ADMIN_API_KEY=<openssl rand -hex 32>
+   FAL_WEBHOOK_SECRET=<openssl rand -hex 32>
+   # FAL_API_KEY — можно взять с musicfy; Apple/APNs — свои или пустые до релиза
+   ```
+   `chmod 600 /opt/<dir>/.env`
+4. **Проверка compose config:**
+   ```bash
+   cd /opt/<dir>
+   docker compose -p <dir> -f docker-compose.prod.yml --env-file .env config | grep -E "image:|Host\(|routers\."
+   ```
+   Ожидается: image `<dir>-api:prod`, router `<dir>`, Host(`<домен>`).
+5. **Первый подъём:**
+   ```bash
+   docker network inspect web >/dev/null 2>&1 || docker network create web
+   docker compose -p <dir> -f docker-compose.prod.yml --env-file .env up -d --build
+   # дождаться healthy у <dir>-api-1
+   ```
+6. **Smoke:** `GET https://<домен>/healthz` → 200; `GET https://<домен>/health` → 200;
+   `GET https://<домен>/v1/billing/products` → 200.
+7. **Соседи не затронуты:** `docker inspect --format '{{.State.Health.Status}}' musicfy-api-1`
+   остаётся `healthy`.
+8. **В CI:** добавить `<dir>:<dir>` в `$INSTANCES` в `.github/workflows/deploy.yml` + строку
+   в таблицу §4 INSTANCES-loop → commit/push **только после** healthz 200.
+
+### Текущий флот
+
+| dir | project | домен | PUBLIC_BASE_URL |
+|---|---|---|---|
+| musicfy | musicfy | zavionix.shop | https://zavionix.shop |
+| norqelia | norqelia | norqelia.shop | https://norqelia.shop |

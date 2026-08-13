@@ -1,13 +1,18 @@
 name: Deploy
 
-# Деплой musicfy на общий Linux-сервер за Traefik.
+# Деплой musicfy на общий Linux-сервер за Traefik (мульти-инстанс).
 # Gating: деплой запускается ТОЛЬКО после успешного завершения workflow "CI"
 # (workflow_run + completed). Job-level if пропускает деплой, если CI упал,
 # событие не push или ветка не main. Деплоится ИМЕННО протестированный коммит
 # (checkout ref: head_sha), а не последний main.
+#
 # Стратегия: rsync рабочего дерева на сервер (сервер НЕ ходит в приватный repo),
-# затем docker compose up -d --build по SSH.
-# Секреты на сервере (/opt/musicfy/.env) при rsync НЕ перезаписываются (--exclude='.env').
+# затем docker compose up -d --build по SSH для КАЖДОГО инстанса из $INSTANCES.
+# Секреты на сервере (/opt/<dir>/.env) при rsync НЕ перезаписываются (--exclude='.env').
+#
+# Формат INSTANCES: "dir:project …" (как в claude-ios).
+#   musicfy:musicfy   → /opt/musicfy,  COMPOSE_PROJECT_NAME=musicfy,  zavionix.shop
+#   norqelia:norqelia → /opt/norqelia, COMPOSE_PROJECT_NAME=norqelia, norqelia.shop
 on:
   workflow_run:
     workflows: ["CI"]
@@ -42,44 +47,66 @@ jobs:
           printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Rsync project to server
-        run: |
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
-            --exclude='.git' \
-            --exclude='.env' \
-            --exclude='.venv' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='.pytest_cache' \
-            --exclude='.ruff_cache' \
-            --exclude='.coverage' \
-            --exclude='.idea' \
-            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/musicfy/"
-
-      - name: Deploy on server
+      - name: Ensure shared Traefik network
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            'set -e
-             cd /opt/musicfy
-             docker network inspect web >/dev/null 2>&1 || docker network create web
-             docker compose -f docker-compose.prod.yml up -d --build
-             # Health gate: ждём healthy api до ~120с, иначе FAIL (старый образ остаётся для отката).
-             ok=0
-             for i in $(seq 1 24); do
-               status=$(docker inspect --format "{{.State.Health.Status}}" musicfy-api-1 2>/dev/null || echo "missing")
-               if [ "$status" = "healthy" ]; then ok=1; break; fi
-               echo "waiting for musicfy-api-1 health: $status ($i/24)"
-               sleep 5
-             done
-             if [ "$ok" != "1" ]; then
-               echo "api did not become healthy within timeout, aborting (old image kept for rollback)" >&2
-               docker compose -f docker-compose.prod.yml ps
-               exit 1
-             fi
-             # Prune только после подтверждения health.
-             docker image prune -f'
+            'docker network inspect web >/dev/null 2>&1 || docker network create web'
+
+      - name: Rsync + deploy all instances
+        env:
+          # dir:project pairs. Добавлять новый инстанс СЮДА только после ручного
+          # провижининга (/opt/<dir> + .env + healthz 200). См. docs/DEPLOYMENT.md §Мульти-инстанс.
+          INSTANCES: "musicfy:musicfy norqelia:norqelia"
+        run: |
+          set -euo pipefail
+          SSH=(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes)
+          RSYNC_SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          HOST="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+
+          for pair in $INSTANCES; do
+            dir="${pair%%:*}"
+            proj="${pair##*:}"
+            echo "======== deploy $dir (project=$proj) ========"
+
+            # Каталог должен существовать (провижининг — ручной; .env уже на месте).
+            "${SSH[@]}" "$HOST" "test -d /opt/$dir && test -f /opt/$dir/.env"
+
+            rsync -az --delete \
+              -e "$RSYNC_SSH" \
+              --exclude='.git' \
+              --exclude='.env' \
+              --exclude='.venv' \
+              --exclude='__pycache__' \
+              --exclude='*.pyc' \
+              --exclude='.pytest_cache' \
+              --exclude='.ruff_cache' \
+              --exclude='.coverage' \
+              --exclude='.idea' \
+              ./ "$HOST:/opt/$dir/"
+
+            "${SSH[@]}" "$HOST" \
+              "set -e
+               cd /opt/$dir
+               docker compose -p $proj -f docker-compose.prod.yml --env-file .env up -d --build
+               ok=0
+               for i in \$(seq 1 24); do
+                 status=\$(docker inspect --format '{{.State.Health.Status}}' ${proj}-api-1 2>/dev/null || echo missing)
+                 if [ \"\$status\" = healthy ]; then ok=1; break; fi
+                 echo \"waiting for ${proj}-api-1 health: \$status (\$i/24)\"
+                 sleep 5
+               done
+               if [ \"\$ok\" != 1 ]; then
+                 echo \"${proj}-api-1 did not become healthy within timeout\" >&2
+                 docker compose -p $proj -f docker-compose.prod.yml --env-file .env ps
+                 exit 1
+               fi"
+
+            echo "======== $dir healthy ========"
+          done
+
+          # Prune только после подтверждения health всех инстансов.
+          "${SSH[@]}" "$HOST" 'docker image prune -f'
 
       - name: Cleanup SSH key
         if: always()
