@@ -83,6 +83,31 @@ class StubFalProvider:
             "[Chorus]\nThis is the stub chorus line\nSinging out into the night"
         )
 
+    async def assist_text(
+        self,
+        *,
+        action,
+        target,
+        text,
+        language="en",
+        genre=None,
+        mood=None,
+    ) -> tuple[str, str | None]:
+        source = (text or "a new musical idea").strip()
+        if target == "prompt":
+            content = f"Polished {genre or 'modern'} track about {source}"
+        else:
+            content = (
+                f"[Verse]\nStub {action} lyrics about {source}\n\n"
+                "[Chorus]\nA memorable chorus"
+            )
+        return content, "Stub Song Title"
+
+    async def generate_track_title(
+        self, *, prompt, lyrics, language="en"
+    ) -> str:
+        return "Stub Song Title"
+
     async def submit_speech(
         self, *, text, voice_id, webhook_url, idempotency_key
     ) -> FalSubmitResult:

@@ -45,7 +45,7 @@ def _source_basename(url: str) -> str | None:
 def derive_track_title(kind: str, input_payload: dict[str, Any] | None) -> str:
     """Возвращает детерминированный непустой заголовок трека.
 
-    song: ``title`` → ``prompt`` → ``custom_lyrics`` → ``lyrics_prompt`` → «New Song».
+    song: ``title`` → LLM ``_generated_title`` → prompt/lyrics fallback → «New Song».
     cover: ``title`` → «Cover • <basename(source_audio_url)>» → «Cover».
     """
     payload = input_payload or {}
@@ -63,6 +63,10 @@ def derive_track_title(kind: str, input_payload: dict[str, Any] | None) -> str:
         return "Cover"
 
     # song
+    generated = _clean(payload.get("_generated_title"))
+    if generated:
+        return _truncate(generated)
+
     for key in ("prompt", "custom_lyrics", "lyrics_prompt"):
         value = _clean(payload.get(key))
         if value:

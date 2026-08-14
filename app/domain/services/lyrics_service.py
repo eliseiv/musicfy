@@ -71,6 +71,46 @@ class LyricsService:
             raise
         return draft
 
+    async def assist(
+        self,
+        *,
+        user_id: UUID,
+        action: str,
+        target: str,
+        text: str | None,
+        language: str = "en",
+        genre: str | None = None,
+        mood: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Inspire / Write / Enhance с тем же биллингом и refund-гарантией, что lyrics."""
+        op_id = idempotency_key or str(uuid4())
+        charged = await self._credits.charge(
+            user_id=user_id,
+            job_type="lyrics",
+            idempotency_key=f"charge:lyrics-assist:{op_id}",
+            ref_type="lyrics_assist",
+            ref_id=str(op_id),
+        )
+        try:
+            return await self._fal.assist_text(
+                action=action,
+                target=target,
+                text=text,
+                language=language,
+                genre=genre,
+                mood=mood,
+            )
+        except Exception:
+            await self._credits.refund(
+                user_id=user_id,
+                units=charged,
+                idempotency_key=f"refund:lyrics-assist:{op_id}",
+                ref_type="lyrics_assist",
+                ref_id=str(op_id),
+            )
+            raise
+
     async def get(self, *, user_id: UUID, draft_id: UUID) -> LyricsDraft:
         async with self._sessionmaker() as session:
             draft = await LyricsRepository(session).get(draft_id)

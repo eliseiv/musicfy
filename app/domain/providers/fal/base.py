@@ -102,6 +102,25 @@ class FalProvider(Protocol):
         mood: str | None = None,
     ) -> str: ...
 
+    async def assist_text(
+        self,
+        *,
+        action: str,
+        target: str,
+        text: str | None,
+        language: str = "en",
+        genre: str | None = None,
+        mood: str | None = None,
+    ) -> tuple[str, str | None]: ...
+
+    async def generate_track_title(
+        self,
+        *,
+        prompt: str | None,
+        lyrics: str | None,
+        language: str = "en",
+    ) -> str: ...
+
     # ----- vocal / voice -----
     async def submit_speech(
         self,

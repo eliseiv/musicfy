@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -33,6 +35,37 @@ logger = logging.getLogger(__name__)
 REST_STORAGE_BASE = "https://rest.alpha.fal.ai"
 # Sync (не queue) вызовы — на fal.run.
 SYNC_BASE = "https://fal.run"
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _parse_llm_json(output: str) -> dict[str, Any]:
+    """Разбирает JSON даже если модель обернула его в markdown fence."""
+    cleaned = _JSON_FENCE_RE.sub("", output.strip())
+    try:
+        value = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        # Последний безопасный шанс: извлечь первый JSON-object из лишнего текста.
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise FalProviderError("fal LLM returned invalid JSON") from exc
+        try:
+            value = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError as nested:
+            raise FalProviderError("fal LLM returned invalid JSON") from nested
+    if not isinstance(value, dict):
+        raise FalProviderError("fal LLM returned non-object JSON")
+    return value
+
+
+def _clean_title(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    title = value.strip().strip("\"'").replace("\n", " ")
+    title = re.sub(r"\s+", " ", title)
+    if not title:
+        return None
+    return title[:80].rstrip()
 
 
 class FalAiProvider:
@@ -202,8 +235,111 @@ class FalAiProvider:
         )
         full_prompt = f"{system}\n\nTheme: {prompt}\n\nLyrics:"
 
+        output = await self._run_llm(full_prompt)
+        for marker in (
+            "Lyrics:\n",
+            "lyrics:\n",
+            "Here are",
+            "Here is",
+            "Here's",
+            "Sure,",
+            "Sure!",
+        ):
+            if marker in output[:80]:
+                parts = output.split("\n\n", 1)
+                if len(parts) == 2:
+                    output = parts[1].strip()
+                break
+        output = output.replace("**", "").replace("__", "").replace("`", "")
+        return output.strip().strip("\"'").strip()
+
+    async def assist_text(
+        self,
+        *,
+        action: str,
+        target: str,
+        text: str | None,
+        language: str = "en",
+        genre: str | None = None,
+        mood: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Inspire / Write / Enhance для lyrics и музыкального prompt."""
+        source = (text or "").strip()
+        hints = ", ".join(
+            part for part in (f"genre={genre}" if genre else "", f"mood={mood}" if mood else "")
+            if part
+        )
+        context = f" Additional context: {hints}." if hints else ""
+
+        if target == "lyrics":
+            if action == "enhance":
+                task = (
+                    "Rewrite and improve the supplied song lyrics while preserving their meaning. "
+                    "Improve imagery, rhythm, rhyme and structure."
+                )
+            elif action == "inspire":
+                task = (
+                    "Create fresh, inspiring song lyrics from the theme, or invent an original "
+                    "theme if none is supplied."
+                )
+            else:
+                task = "Write a complete original song from the supplied theme."
+            format_rule = (
+                "The content must be complete lyrics with [Verse], [Chorus] and optional [Bridge] "
+                "section markers."
+            )
+        else:
+            if action == "enhance":
+                task = (
+                    "Rewrite the supplied music-generation prompt to be vivid, specific and useful "
+                    "for a text-to-music model. Preserve the user's intent."
+                )
+            elif action == "inspire":
+                task = (
+                    "Invent one compelling music-generation prompt, using an original genre, mood, "
+                    "instrumentation and production direction."
+                )
+            else:
+                task = (
+                    "Turn the supplied idea into one concise, detailed music-generation prompt."
+                )
+            format_rule = "The content must be a single prompt, without commentary or labels."
+
+        full_prompt = (
+            "You are a professional songwriter and music producer. "
+            f"{task} Write in language code '{language}'.{context} {format_rule} "
+            "Also suggest a memorable song title of 2-6 words. "
+            'Return ONLY valid JSON: {"content":"...","title":"..."}. '
+            f"User text: {source or '(none)'}"
+        )
+        output = await self._run_llm(full_prompt)
+        parsed = _parse_llm_json(output)
+        content = str(parsed.get("content") or "").strip()
+        title = _clean_title(parsed.get("title"))
+        if not content:
+            raise FalProviderError("fal LLM returned empty assist content")
+        return content, title
+
+    async def generate_track_title(
+        self,
+        *,
+        prompt: str | None,
+        lyrics: str | None,
+        language: str = "en",
+    ) -> str:
+        source = (lyrics or prompt or "").strip()
+        if not source:
+            return "New Song"
+        full_prompt = (
+            "Create one memorable title of 2-6 words for this song. "
+            f"Use language code '{language}'. Return ONLY the title, no quotes or commentary. "
+            f"Song context:\n{source[:4000]}"
+        )
+        return _clean_title(await self._run_llm(full_prompt)) or "New Song"
+
+    async def _run_llm(self, prompt: str) -> str:
         url = f"{SYNC_BASE}/fal-ai/any-llm"
-        body = {"model": self._lyrics_llm, "prompt": full_prompt}
+        body = {"model": self._lyrics_llm, "prompt": prompt}
         token = provider_var.set(self.PROVIDER_NAME)
         try:
             try:
@@ -215,25 +351,12 @@ class FalAiProvider:
                     f"fal LLM call failed: {exc.__class__.__name__}: {exc}"
                 ) from exc
             if resp.status_code >= 400:
-                raise FalProviderError(f"fal LLM returned {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            output = str(data.get("output") or "").strip()
-            for marker in (
-                "Lyrics:\n",
-                "lyrics:\n",
-                "Here are",
-                "Here is",
-                "Here's",
-                "Sure,",
-                "Sure!",
-            ):
-                if marker in output[:80]:
-                    parts = output.split("\n\n", 1)
-                    if len(parts) == 2:
-                        output = parts[1].strip()
-                    break
-            output = output.replace("**", "").replace("__", "").replace("`", "")
-            output = output.strip().strip("\"'").strip()
+                raise FalProviderError(
+                    f"fal LLM returned {resp.status_code}: {resp.text[:200]}"
+                )
+            output = str(resp.json().get("output") or "").strip()
+            if not output:
+                raise FalProviderError("fal LLM returned empty output")
             return output
         finally:
             provider_var.reset(token)

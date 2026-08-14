@@ -28,7 +28,26 @@ class SongPipeline(BasePipeline):
         await self._mark_status(job.id, JobStatus.running)
         await self._record_stage(job.id, JobStage.prepare_prompt, "succeeded")
         lyrics = await self._resolve_lyrics(job)
+        await self._resolve_title(job, lyrics=lyrics)
         await self._submit_music(job, lyrics=lyrics)
+
+    async def _resolve_title(self, job: Job, *, lyrics: str | None) -> None:
+        """Генерирует короткое название; сбой LLM не блокирует создание трека."""
+        payload = job.input_payload or {}
+        if payload.get("title") or payload.get("_generated_title"):
+            return
+        prompt = payload.get("prompt") or payload.get("lyrics_prompt")
+        try:
+            title = await self._fal.generate_track_title(
+                prompt=prompt,
+                lyrics=lyrics or payload.get("custom_lyrics"),
+                language=payload.get("language") or "en",
+            )
+        except (FalProviderError, FalTimeout) as exc:
+            logger.warning("title gen failed for job=%s: %s", job.id, exc)
+            return
+        if title and title.strip():
+            await self._update_payload(job.id, {"_generated_title": title.strip()[:80]})
 
     async def _resolve_lyrics(self, job: Job) -> str | None:
         payload = job.input_payload or {}

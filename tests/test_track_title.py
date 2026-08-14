@@ -10,12 +10,20 @@ from __future__ import annotations
 from app.domain.services.track_title import derive_track_title
 
 # --------------------------------------------------------------------------
-# song: title > prompt > custom_lyrics > lyrics_prompt > "New Song"
+# song: title > generated title > prompt > custom_lyrics > lyrics_prompt > "New Song"
 # --------------------------------------------------------------------------
 
 
 def test_song_title_wins():
     assert derive_track_title("song", {"title": "My Hit", "prompt": "ignored"}) == "My Hit"
+
+
+def test_song_generated_title_wins_over_prompt():
+    payload = {
+        "_generated_title": "Neon Afterglow",
+        "prompt": "an upbeat indie pop song",
+    }
+    assert derive_track_title("song", payload) == "Neon Afterglow"
 
 
 def test_song_prompt_when_no_title():
