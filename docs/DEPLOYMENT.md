@@ -337,11 +337,24 @@ SECRET=$(openssl rand -hex 32)
 echo "ADAPTY_WEBHOOK_SECRET=$SECRET" >> /opt/<instance>/.env
 
 # 3. Перезапустить только api (без пересборки образа)
-cd /opt/<instance> && docker compose -p <project> up -d --no-build api
+cd /opt/<instance>
+docker compose -p <project> -f docker-compose.prod.yml --env-file .env up -d --no-build api
 
 # 4. Проверить, что переменная доехала в контейнер
-docker compose -p <project> exec api sh -lc 'test -n "$ADAPTY_WEBHOOK_SECRET" && echo set'
+docker compose -p <project> -f docker-compose.prod.yml exec api   sh -lc 'test -n "$ADAPTY_WEBHOOK_SECRET" && echo set'
 ```
+
+> ⚠️ **`-f docker-compose.prod.yml` обязателен в КАЖДОЙ команде compose на сервере.**
+> Без него compose подхватит dev-файл `docker-compose.yml`, лежащий в том же каталоге. Он
+> задаёт `DATABASE_URL` с dev-паролем `musicfy` и **не содержит Traefik-лейблов**, поэтому
+> `up` из него пересоздаёт контейнеры так, что api падает на миграциях
+> (`password authentication failed for user "musicfy"` — prod-volume хранит другой пароль), а
+> Traefik теряет роутер домена и отдаёт **404** на все запросы. Проверить, из какого файла
+> собран работающий контейнер:
+> `docker inspect <project>-api-1 --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}'`
+> — должно быть `docker-compose.prod.yml`. Восстановление:
+> `docker compose -p <project> -f docker-compose.prod.yml --env-file .env up -d`
+> (volume не трогать — данные в нём).
 
 **4. Adapty Dashboard** → Integrations → Webhook:
 - URL: `https://<SERVICE_DOMAIN>/v1/billing/adapty/webhook`
