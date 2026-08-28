@@ -119,6 +119,17 @@ class Settings(BaseSettings):
     # ключом гарантируется проверкой подписи JWS leaf-ключом.
     APPLE_STOREKIT_TRUST_XCODE_TEST_CERTS: bool = False
 
+    # --- Adapty (вебхук подписок, ADR-019) ---
+    # Статический bearer вебхука. Adapty НЕ подписывает payload (HMAC невозможен), поэтому
+    # подлинность вызова держится только на этом секрете: он же прописывается в Adapty
+    # Dashboard как заголовок `Authorization: Bearer <secret>`. Пустое значение → endpoint
+    # отвечает 500 (Adapty ретраит, пока оператор не задаст секрет), а не молча принимает.
+    ADAPTY_WEBHOOK_SECRET: SecretStr = SecretStr("")
+    # Fallback-грант монет для продукта, которого нет в каталоге `products` (или у которого
+    # `grants.coins` пуст). Каталог — источник истины; это страховка от «событие пришло, а
+    # продукт ещё не засеян», чтобы платящий пользователь не остался без монет.
+    ADAPTY_SUBSCRIPTION_COINS_GRANT: int = 1000
+
     # --- APNs ---
     APNS_ENABLED: bool = False
     APNS_KEY_ID: str = ""

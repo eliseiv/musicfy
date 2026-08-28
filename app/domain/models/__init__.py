@@ -4,6 +4,7 @@
 Base.metadata для автогенерации миграций. Модели добавляются по мере реализации
 фаз; список ниже отражает целевую схему V1.
 """
+from app.domain.models.adapty import AdaptyWebhookEvent  # noqa: F401,E402
 from app.domain.models.asset import Asset  # noqa: F401,E402
 from app.domain.models.auth_identity import AuthIdentity  # noqa: F401,E402
 

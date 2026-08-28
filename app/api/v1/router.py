@@ -7,6 +7,7 @@ from app.api.v1 import (
     analytics,
     auth,
     billing,
+    billing_adapty,
     covers,
     devices,
     jobs,
@@ -35,6 +36,7 @@ api_v1_router.include_router(jobs.router)
 api_v1_router.include_router(tracks.router)
 api_v1_router.include_router(library.router)
 api_v1_router.include_router(billing.router)
+api_v1_router.include_router(billing_adapty.router)
 api_v1_router.include_router(analytics.router)
 api_v1_router.include_router(admin.router)
 api_v1_router.include_router(webhooks.router)

@@ -318,9 +318,57 @@ compose-project `<project>`, свой volume `pgdata`, свой `.env`. Обще
 | `POSTGRES_PASSWORD` | пароль БД инстанса (уникальный) | — (обязателен) |
 | `API_KEY` / `ADMIN_API_KEY` | сервисный / админ-ключ (уникальные) | — |
 | `FAL_WEBHOOK_SECRET` | HMAC webhook fal (уникальный) | — |
+| `ADAPTY_WEBHOOK_SECRET` | bearer вебхука Adapty (уникальный, см. ниже) | — |
 
 `FAL_API_KEY` можно разделять между инстансами (как Anthropic-ключ у claude-ios).
 Apple/StoreKit/APNs — per-instance (свой bundle id / ключи).
+
+### Постановка секрета вебхука Adapty ([ADR-019](./adr/ADR-019-adapty-subscription-webhook.md))
+
+Adapty **не подписывает** payload, поэтому единственная защита эндпоинта — статический общий
+секрет. Его генерирует оператор и прописывает в ДВУХ местах; расхождение даёт 401, пустое
+значение — 500.
+
+```bash
+# 1. Сгенерировать (на сервере или локально)
+SECRET=$(openssl rand -hex 32)
+
+# 2. Записать в .env инстанса
+echo "ADAPTY_WEBHOOK_SECRET=$SECRET" >> /opt/<instance>/.env
+
+# 3. Перезапустить только api (без пересборки образа)
+cd /opt/<instance> && docker compose -p <project> up -d --no-build api
+
+# 4. Проверить, что переменная доехала в контейнер
+docker compose -p <project> exec api sh -lc 'test -n "$ADAPTY_WEBHOOK_SECRET" && echo set'
+```
+
+**4. Adapty Dashboard** → Integrations → Webhook:
+- URL: `https://<SERVICE_DOMAIN>/v1/billing/adapty/webhook`
+- Header: `Authorization: Bearer <значение $SECRET>`
+
+Adapty при сохранении шлёт проверочный пинг с пустым телом — эндпоинт ответит
+`200 {"result":"ignored","reason":"empty_body"}`, и конфигурация сохранится.
+
+**Верификация после настройки:**
+
+```bash
+# Без токена → 401
+curl -si -X POST https://<SERVICE_DOMAIN>/v1/billing/adapty/webhook -d '{}' | head -1
+
+# С верным токеном и пустым телом → 200 ignored/empty_body
+curl -s -X POST https://<SERVICE_DOMAIN>/v1/billing/adapty/webhook   -H "Authorization: Bearer $SECRET" -d ''
+```
+
+Диагностика: `401` — значения в `.env` и в Adapty разошлись; `500` — переменная пуста или не
+доехала в контейнер (шаг 3 пропущен).
+
+**Секрет — ПЕР-ИНСТАНС.** Не делить между `zavionix.shop` и `norqelia.shop`: общий секрет
+означает, что компрометация одного инстанса даёт право начислять монеты во втором.
+
+Мониторинг: записи `adapty_webhook_outcome` уровня WARNING — класс «Adapty аутентифицировался,
+но монеты не доехали» (`user_not_found`, `missing_customer_user_id`, неизвестный тип события).
+На них имеет смысл повесить алерт.
 
 ### Процедура провижининга клона
 

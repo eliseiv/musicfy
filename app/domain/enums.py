@@ -115,6 +115,9 @@ class SubscriptionStatus(str, Enum):
 
 class BillingProvider(str, Enum):
     apple = "apple"
+    # Adapty — агрегатор подписок поверх App Store (ADR-019). Отдельное значение нужно,
+    # чтобы по строке subscription_state было видно, какой контур ею владеет.
+    adapty = "adapty"
 
 
 class StoreKitEnvironment(str, Enum):

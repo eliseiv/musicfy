@@ -7,7 +7,7 @@
   2. Клиентский каталог §Решение/1: `GET /v1/billing/products` (`list_active`) отдаёт
      РОВНО 7 новых вербатим-продуктов с верными grants/period и без старых `com.musicfy.*`.
   3. Новый продукт начисляет верную сумму монет через реальный verify-flow.
-  4. Идемпотентность/обратимость миграции 0017: round-trip `downgrade -1 && upgrade head`
+  4. Идемпотентность/обратимость миграции 0017: round-trip `downgrade 0016 && upgrade head`
      не плодит дублей и восстанавливает идентичное состояние (7 new active / 6 old inactive).
 
 verify-flow реального пользователя: APP_ENV=test → verify_signature=false (conftest),
@@ -39,9 +39,12 @@ NEW_CATALOG: dict[str, tuple[str, int, int | None]] = {
     "500_tokens_34.99": ("coin_pack", 500, None),
     "1000_tokens_59.99": ("coin_pack", 1000, None),
     "2000_tokens_99.99": ("coin_pack", 2000, None),
-    "week_6.99_not_trial": ("subscription", 100, 7),
-    "yearly_49.99_not_trial": ("subscription", 1000, 365),
+    "week_6.99_not_trial": ("subscription", 700, 7),
+    "yearly_49.99_not_trial": ("subscription", 5000, 365),
 }
+
+# Ревизия ПЕРЕД 0017 — точка отката для round-trip теста каталога.
+_CATALOG_BASE = "0016_purchase_dedup_key"
 
 # Старый монетный каталог (0011), деактивируемый 0017. Grants сохраняются как были.
 LEGACY_IDS = [
@@ -104,7 +107,7 @@ async def test_new_coin_pack_100_tokens_credits_wallet(client):
 
 
 @pytest.mark.asyncio
-async def test_new_yearly_subscription_credits_1000(client):
+async def test_new_yearly_subscription_credits_its_tier(client):
     headers = await auth_headers(client)
     signed = make_signed_transaction(
         product_id="yearly_49.99_not_trial",
@@ -118,7 +121,7 @@ async def test_new_yearly_subscription_credits_1000(client):
     body = r.json()
     assert body["status"] == "ok"
     assert body["deduplicated"] is False
-    assert await _balance(client, headers) == {"coinsAvailable": 1000, "coinsReserved": 0}
+    assert await _balance(client, headers) == {"coinsAvailable": 5000, "coinsReserved": 0}
     ledger = (await client.get("/v1/billing/ledger", headers=headers)).json()
     assert any(e["kind"] == "credit_subscription_grant" for e in ledger)
 
@@ -237,11 +240,15 @@ def _alembic(*args: str) -> None:
 
 @pytest.mark.asyncio
 async def test_migration_0017_roundtrip_idempotent_and_reversible():
-    """downgrade -1 && upgrade head восстанавливает идентичное состояние, без дублей.
+    """downgrade до 0016 && upgrade head восстанавливает идентичное состояние, без дублей.
 
     downgrade НЕ удаляет строки (FK-safe): деактивирует новые, реактивирует старые.
     Повторный upgrade идёт по ветке ON CONFLICT DO UPDATE (строки уже существуют),
     поэтому round-trip обязан быть точным no-op по составу каталога.
+
+    Целевая ревизия задана ЯВНО (`0016_purchase_dedup_key`), а не через `-1`: после 0017
+    появились ревизии, не относящиеся к каталогу (0018-0020, ADR-019), и относительный шаг
+    откатывал бы последнюю из них вместо проверяемой миграции каталога.
     """
     state_head = await _catalog_state()
     try:
@@ -256,8 +263,8 @@ async def test_migration_0017_roundtrip_idempotent_and_reversible():
         assert old_inactive == set(LEGACY_IDS), state_head
         assert len(state_head) == 13
 
-        # downgrade -1 → 0016: реактивация 6 старых, деактивация 7 новых, БЕЗ удаления строк.
-        _alembic("downgrade", "-1")
+        # downgrade → 0016: реактивация 6 старых, деактивация 7 новых, БЕЗ удаления строк.
+        _alembic("downgrade", _CATALOG_BASE)
         state_down = await _catalog_state()
         assert set(state_down) == set(state_head), "downgrade не должен удалять строки (FK-safe)"
         for pid in LEGACY_IDS:
@@ -265,7 +272,7 @@ async def test_migration_0017_roundtrip_idempotent_and_reversible():
         for pid in NEW_CATALOG:
             assert state_down[pid][3] is False, f"{pid} должен деактивироваться на downgrade"
 
-        # upgrade head → 0017: upsert по ON CONFLICT DO UPDATE (строки уже есть).
+        # upgrade head: upsert 0017 по ON CONFLICT DO UPDATE + гранты 0020 поверх.
         _alembic("upgrade", "head")
         state_up = await _catalog_state()
         # Round-trip идемпотентен и обратим: состояние идентично исходному, без дублей.
@@ -273,7 +280,7 @@ async def test_migration_0017_roundtrip_idempotent_and_reversible():
         assert len(state_up) == 13
 
         # Второй round-trip: повторный прогон upsert по-прежнему даёт идентичное состояние.
-        _alembic("downgrade", "-1")
+        _alembic("downgrade", _CATALOG_BASE)
         _alembic("upgrade", "head")
         state_up2 = await _catalog_state()
         assert state_up2 == state_head

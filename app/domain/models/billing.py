@@ -86,6 +86,11 @@ class SubscriptionState(Base, TimestampMixin):
     product_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Продлится ли подписка автоматически (ADR-019). NULL — неизвестно (StoreKit-путь поле
+    # не заполняет). Adapty присылает отмену автопродления отдельным событием, при котором
+    # доступ сохраняется до конца периода: без этого флага клиент не отличил бы «активна и
+    # продлится» от «активна, но последняя».
+    will_renew: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class CoinWallet(Base, TimestampMixin):

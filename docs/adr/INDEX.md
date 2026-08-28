@@ -23,3 +23,4 @@
 | [ADR-016](./ADR-016-video-generation-params-fix.md) | Фикс параметров видео-генерации: style→prompt, generate_audio=false, resolution/размер (уточняет ADR-007) | Accepted | 2026-07-14 |
 | [ADR-017](./ADR-017-subscription-transfer-on-reinstall.md) | Перенос подписки при переустановке: entitlement следует за Apple ID (дополняет ADR-013) | Accepted | 2026-07-23 |
 | [ADR-018](./ADR-018-multi-instance-traefik.md) | Мульти-инстанс musicfy за общим Traefik (клоны по доменам, norqelia.shop) | Accepted | 2026-08-13 |
+| [ADR-019](./ADR-019-adapty-subscription-webhook.md) | Вебхук подписок Adapty параллельно со StoreKit-контуром (двойная идемпотентность, резолв по device-id) | Accepted | 2026-08-28 |

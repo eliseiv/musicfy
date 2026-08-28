@@ -57,9 +57,9 @@ async def test_products_return_coin_grants(client):
     assert products["2000_tokens_99.99"]["grants"] == {"coins": 2000}
     assert products["100_tokens_9.99"]["kind"] == "coin_pack"
     weekly = products["week_6.99_not_trial"]
-    assert weekly["grants"] == {"coins": 100}
+    assert weekly["grants"] == {"coins": 700}
     assert weekly["periodDays"] == 7
-    assert products["yearly_49.99_not_trial"]["grants"] == {"coins": 1000}
+    assert products["yearly_49.99_not_trial"]["grants"] == {"coins": 5000}
     # старый com.musicfy.* каталог из клиентского списка исчез (деактивирован)
     assert not any(pid.startswith("com.musicfy.") for pid in products)
 

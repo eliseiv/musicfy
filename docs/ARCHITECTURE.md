@@ -440,7 +440,9 @@ ffmpeg-рендер / мукс / бёрн-ин лирики / upload — **за�
 
 ## Биллинг
 
-Прямой StoreKit 2: `providers/billing/apple.py` (верификация подписанных JWS-транзакций через App Store
+Два независимых платёжных контура пополняют один и тот же `coin_wallets`.
+
+**Контур 1 — прямой StoreKit 2:** `providers/billing/apple.py` (верификация подписанных JWS-транзакций через App Store
 Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notifications V2). Продукты —
 пакеты монет (`coin_pack`, `grants={"coins":N}`) и подписки, начисляющие монеты за период; оба
 пополняют единый `coin_wallets`. Restore — через `original_transaction_id`.
@@ -448,8 +450,8 @@ Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notific
 ### Каталог продуктов — источник истины ([ADR-015](./adr/ADR-015-product-catalog-verbatim-reseed.md))
 
 `external_product_id` совпадает **вербатим** с `product_id` в App Store Connect / `.storekit`; StoreKit
-матчит покупку по этой строке байт-в-байт. Актуальный активный каталог (`active=true`, засеян миграцией
-`0017`):
+матчит покупку по этой строке байт-в-байт; Adapty сравнивает `vendor_product_id` так же. Актуальный
+активный каталог (`active=true`, засеян миграцией `0017`, гранты подписок — `0020`):
 
 | external_product_id | kind | title | grants | period_days |
 |---|---|---|---|---|
@@ -458,8 +460,33 @@ Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notific
 | `500_tokens_34.99` | coin_pack | 500 Tokens | `{"coins":500}` | — |
 | `1000_tokens_59.99` | coin_pack | 1000 Tokens | `{"coins":1000}` | — |
 | `2000_tokens_99.99` | coin_pack | 2000 Tokens | `{"coins":2000}` | — |
-| `week_6.99_not_trial` | subscription | Weekly | `{"coins":100}` | 7 |
-| `yearly_49.99_not_trial` | subscription | Yearly | `{"coins":1000}` | 365 |
+| `week_6.99_not_trial` | subscription | Weekly | `{"coins":700}` | 7 |
+| `yearly_49.99_not_trial` | subscription | Yearly | `{"coins":5000}` | 365 |
+
+### Контур 2 — Adapty ([ADR-019](./adr/ADR-019-adapty-subscription-webhook.md))
+
+Server-to-server вебхук `POST /v1/billing/adapty/webhook`: агрегатор сам узнаёт о покупке от Apple,
+клиенту не нужно довозить чек. Реализация — `providers/billing/adapty.py` (дефенсивный парсер +
+`classify_event`), `services/adapty_webhook_service.py` (дедуп → подписка → монеты → лог),
+`services/webhook_user_resolve.py` (резолв пользователя).
+
+Три особенности, определяющие дизайн:
+
+- **Adapty не подписывает payload** — подлинность держится на статическом bearer
+  `ADAPTY_WEBHOOK_SECRET` (constant-time сравнение). Незаданный секрет → 500, неверный → 401.
+- **Adapty бесконечно ретраит не-2xx**, поэтому тело читается сырым (без Pydantic-модели запроса),
+  и любой авторизованный исход — 200 с `{result: applied|duplicate|ignored, reason?, eventType?}`.
+- **Одна покупка = несколько событий** с разными `profile_event_id`, но одним `transaction_id`.
+  Отсюда два слоя идемпотентности: дедуп доставки в `adapty_webhook_events` (PK `event_id`) и
+  ledger-ключ `adapty-txn:{transaction_id}`.
+
+`customer_user_id` от Adapty — это deviceId, а не наш userId: резолв двухступенчатый (`users.id`,
+затем `auth_identities.subject` при `provider ∈ {guest, device}`, сравнение по `lower()`).
+Размер начисления берётся из каталога `products`, никогда — из payload или имени продукта.
+
+⚠️ Ключи идемпотентности двух контуров не пересекаются: покупка, прошедшая обоими путями,
+начислится дважды ([TD-014](./100-known-tech-debt.md#td-014)). Митигация контрактная — один
+платёжный путь на сборку приложения.
 
 Прежний каталог (`com.musicfy.coins.*`, `com.musicfy.sub.*`) — `active=false`, строки **не удаляются**:
 FK из `purchases`/`subscription_state` и резолв уже совершённых покупок/продлений должны продолжать

@@ -18,7 +18,7 @@ from sqlalchemy import text
 
 from tests.helpers import auth_user
 
-WEEKLY = "week_6.99_not_trial"  # подписка, грант 100 монет (сид миграции 0017)
+WEEKLY = "week_6.99_not_trial"  # подписка, грант 700 монет (миграция 0020)
 SMALL = "100_tokens_9.99"  # коин-пак, 100 монет
 
 
@@ -97,7 +97,7 @@ async def test_reinstall_same_receipt_transfers_subscription(client, app):
 
     ra = await _verify(client, headers_a, signed)
     assert ra.json() == {"status": "ok", "deduplicated": False, "reason": None}
-    assert await _balance(client, headers_a) == {"coinsAvailable": 100, "coinsReserved": 0}
+    assert await _balance(client, headers_a) == {"coinsAvailable": 700, "coinsReserved": 0}
     assert (await _subscription_row(app, user_a))["status"] == "active"
 
     # переустановка: новый guest предъявляет ТОТ ЖЕ чек
@@ -117,7 +117,7 @@ async def test_reinstall_same_receipt_transfers_subscription(client, app):
     assert await _purchase_owners(app, "sub-tx-1") == {user_b}
     # монеты начислены ровно один раз — прежнему владельцу
     assert await _balance(client, headers_b) == {"coinsAvailable": 0, "coinsReserved": 0}
-    assert await _balance(client, headers_a) == {"coinsAvailable": 100, "coinsReserved": 0}
+    assert await _balance(client, headers_a) == {"coinsAvailable": 700, "coinsReserved": 0}
 
 
 @pytest.mark.asyncio
@@ -156,7 +156,7 @@ async def test_new_transaction_same_chain_takes_over(client, app):
     )
     # новая транзакция: полноценное применение с грантом монет за новый период
     assert rb.json() == {"status": "ok", "deduplicated": False, "reason": None}
-    assert await _balance(client, headers_b) == {"coinsAvailable": 100, "coinsReserved": 0}
+    assert await _balance(client, headers_b) == {"coinsAvailable": 700, "coinsReserved": 0}
 
     assert (await _subscription_row(app, user_b))["status"] == "active"
     assert (await _subscription_row(app, user_a))["status"] == "expired"

@@ -87,7 +87,7 @@ async def test_crm_adjust_tokens_and_subscription(client):
     sub_body = sub.json()
     assert sub_body["applied"] is True
     assert sub_body["subscription_active"] is True
-    assert sub_body["tokens"] == 140  # 40 + 100 coins from weekly plan
+    assert sub_body["tokens"] == 740  # 40 + 700 coins from weekly plan
     assert sub_body["subscription_expires_at"].endswith("Z")
 
     repeat = await client.post(
@@ -101,7 +101,7 @@ async def test_crm_adjust_tokens_and_subscription(client):
     )
     assert repeat.status_code == 200
     assert repeat.json()["applied"] is False
-    assert repeat.json()["tokens"] == 140
+    assert repeat.json()["tokens"] == 740  # повтор идемпотентен: баланс не изменился
 
 
 @pytest.mark.asyncio

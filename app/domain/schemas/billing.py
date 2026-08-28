@@ -75,3 +75,19 @@ class LedgerEntryView(CamelModel):
     amount: int
     reason: str | None
     created_at: datetime
+
+
+class AdaptyWebhookResponse(CamelModel):
+    """Ответ вебхука Adapty (ADR-019). Поля со значением `null` в ответ не попадают.
+
+    `result`:
+      * `applied` — событие распознано и применено;
+      * `duplicate` — это событие уже было доставлено; повтор не изменил ничего;
+      * `ignored` — эффекта нет, причина в `reason` (`empty_body` / `invalid_json` /
+        `not_an_object` / `missing_event_id` / `missing_customer_user_id` / `user_not_found`),
+        либо `reason` пуст и заполнен `event_type` — значит тип события нам неизвестен.
+    """
+
+    result: str
+    reason: str | None = None
+    event_type: str | None = None

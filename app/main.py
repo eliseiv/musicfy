@@ -15,6 +15,7 @@ from app.db.session import build_engine, build_sessionmaker
 from app.domain.providers.billing.apple import AppleStoreKitVerifier
 from app.domain.providers.fal.client import FalAiProvider
 from app.domain.providers.fal.stub import StubFalProvider
+from app.domain.services.adapty_webhook_service import AdaptyWebhookService
 from app.domain.services.admin_service import AdminService
 from app.domain.services.analytics_service import AnalyticsService
 from app.domain.services.asset_service import AssetService
@@ -119,6 +120,10 @@ def create_app(
             ),
         )
 
+        app.state.adapty_webhook_service = AdaptyWebhookService(
+            app.state.sessionmaker,
+            fallback_coins_grant=settings.ADAPTY_SUBSCRIPTION_COINS_GRANT,
+        )
         notifier = NotificationService(app.state.sessionmaker, settings)
         app.state.notification_service = notifier
         moderation = ModerationService(app.state.sessionmaker)

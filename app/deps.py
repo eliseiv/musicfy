@@ -7,13 +7,21 @@ from fastapi import Depends, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.errors import AuthError, Forbidden, InvalidSession
+from app.api.errors import APIError, AuthError, Forbidden, InvalidSession
 from app.auth.sessions import AuthService
 from app.config import Settings, get_settings
 from app.domain.models.user import User
 
 bearer_scheme = HTTPBearer(auto_error=False, description="Session token (Bearer)")
 admin_scheme = HTTPBearer(auto_error=False, description="Админ-ключ (ADMIN_API_KEY)")
+adapty_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="adaptyWebhook",
+    description=(
+        "Статический bearer вебхука Adapty (`ADAPTY_WEBHOOK_SECRET`). Вызывает Adapty, не "
+        "клиент. НЕ пользовательский токен сессии и НЕ админ-ключ."
+    ),
+)
 
 
 def get_settings_dep() -> Settings:
@@ -92,6 +100,13 @@ def get_billing_service(request: Request):
     return svc
 
 
+def get_adapty_webhook_service(request: Request):
+    svc = getattr(request.app.state, "adapty_webhook_service", None)
+    if svc is None:
+        raise RuntimeError("Adapty webhook service is not configured")
+    return svc
+
+
 def get_asset_service(request: Request):
     svc = getattr(request.app.state, "asset_service", None)
     if svc is None:
@@ -144,6 +159,35 @@ def require_admin(
 
     if not hmac.compare_digest(token, settings.ADMIN_API_KEY):
         raise AuthError(message="Invalid admin API key")
+
+
+def require_adapty_webhook(
+    request: Request,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Security(adapty_scheme)
+    ] = None,
+) -> None:
+    """Авторизация вебхука Adapty статическим bearer-секретом (ADR-019).
+
+    Adapty НЕ подписывает payload, поэтому HMAC по телу невозможен — подлинность вызова
+    держится только на общем секрете, который оператор прописывает и в `.env`, и в Adapty
+    Dashboard. Сравнение constant-time.
+
+    Незаданный секрет → 500, а НЕ «пропустить»: пустая строка не должна совпадать ни с чем,
+    а Adapty обязан ретраить, пока оператор не задаст секрет. Неверный/отсутствующий токен →
+    401 без раскрытия причины.
+    """
+    settings: Settings = request.app.state.settings
+    secret = settings.ADAPTY_WEBHOOK_SECRET.get_secret_value()
+    if not secret:
+        raise APIError(
+            "Adapty webhook secret not configured",
+            code="ADAPTY_WEBHOOK_MISCONFIGURED",
+            http_status=500,
+        )
+    presented = credentials.credentials.strip() if credentials else None
+    if not presented or not hmac.compare_digest(presented, secret):
+        raise AuthError(message="Invalid adapty webhook token")
 
 
 async def get_current_user(

@@ -16,6 +16,8 @@ os.environ.setdefault("FAL_WEBHOOK_SECRET", "test-webhook-secret")
 os.environ.setdefault("APPLE_BUNDLE_ID", "com.musicfy.app")
 # Тесты используют синтетические StoreKit-токены — без проверки подписи.
 os.environ.setdefault("APPLE_STOREKIT_VERIFY_SIGNATURE", "false")
+# Секрет вебхука Adapty: без него endpoint отвечает 500 (конфигурационная ошибка).
+os.environ.setdefault("ADAPTY_WEBHOOK_SECRET", "test-adapty-secret")
 
 from asgi_lifespan import LifespanManager  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
@@ -46,6 +48,7 @@ _TRUNCATE_TABLES = [
     "sessions",
     "auth_identities",
     "processed_webhooks",
+    "adapty_webhook_events",
     "users",
 ]
 
