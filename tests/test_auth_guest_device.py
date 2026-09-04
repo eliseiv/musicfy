@@ -63,7 +63,7 @@ async def test_repeated_device_id_keeps_coins(client, app):
 
 @pytest.mark.asyncio
 async def test_old_session_stays_valid_after_relogin(client):
-    """Повторный вход не отзывает прежнюю сессию — параллельные устройства не выбивают друг друга."""
+    """Повторный вход не отзывает прежнюю сессию: устройства не выбивают друг друга."""
     device_id = str(uuid.uuid4())
     first = await _guest(client, device_id)
     await _guest(client, device_id)
