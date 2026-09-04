@@ -24,3 +24,4 @@
 | [ADR-017](./ADR-017-subscription-transfer-on-reinstall.md) | Перенос подписки при переустановке: entitlement следует за Apple ID (дополняет ADR-013) | Accepted | 2026-07-23 |
 | [ADR-018](./ADR-018-multi-instance-traefik.md) | Мульти-инстанс musicfy за общим Traefik (клоны по доменам, norqelia.shop) | Accepted | 2026-08-13 |
 | [ADR-019](./ADR-019-adapty-subscription-webhook.md) | Вебхук подписок Adapty параллельно со StoreKit-контуром (двойная идемпотентность, резолв по device-id) | Accepted | 2026-08-28 |
+| [ADR-020](./ADR-020-guest-sign-in-device-idempotency.md) | Идемпотентность гостевого входа по `deviceId` (повторный вход — тот же гость, не 500) | Accepted | 2026-09-04 |

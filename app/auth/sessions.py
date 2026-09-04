@@ -51,28 +51,84 @@ class AuthService:
         return token, _hash_token(token), now + timedelta(seconds=self._ttl)
 
     async def create_guest(self, *, device_id: str | None = None) -> SessionResult:
+        """Гостевая сессия. Повторный вход с тем же `device_id` — тот же пользователь.
+
+        Идемпотентность по устройству обязательна: клиент зовёт этот endpoint при каждом
+        холодном старте, и на втором вызове identity `(guest, device_id)` уже существует.
+        Раньше метод безусловно создавал нового пользователя и падал на
+        `uq_auth_identities_provider_subject` → 500, то есть приложение после переустановки
+        не могло войти вообще, а вместе с сессией терялись монеты и история устройства.
+
+        Пользователь, уже промоутнутый в Apple-аккаунт (`is_guest=False`), по `device_id`
+        НЕ выдаётся: иначе знание идентификатора устройства заменяло бы Sign in with Apple.
+        Для него заводится новый гость с синтетическим subject, а слияние выполнит
+        `sign_in_with_apple` (он мигрирует данные текущего гостя в постоянный аккаунт).
+        """
         now = datetime.now(UTC)
         async with self._sessionmaker() as session:
             async with session.begin():
-                users = UsersRepository(session)
-                user = await users.create(is_guest=True)
-                subject = device_id or f"guest:{user.id}"
-                await users.add_identity(
-                    user_id=user.id,
-                    provider=AuthProvider.guest,
-                    subject=subject,
-                )
+                user = await self._resolve_guest(session, device_id)
                 token, token_hash, expires_at = self._new_token(now)
                 await SessionsRepository(session).create(
                     user_id=user.id, token_hash=token_hash, expires_at=expires_at
                 )
+                is_guest, display_name = user.is_guest, user.display_name
             return SessionResult(
                 user_id=user.id,
-                is_guest=True,
-                display_name=user.display_name,
+                is_guest=is_guest,
+                display_name=display_name,
                 token=token,
                 expires_at=expires_at,
             )
+
+    async def _resolve_guest(self, session: AsyncSession, device_id: str | None) -> User:
+        """Находит пользователя устройства либо заводит нового (внутри транзакции вызывающего).
+
+        Гонка двух холодных стартов с одним `device_id` реальна (retry клиента, два запроса
+        подряд): оба не найдут identity и оба вставят её. Поэтому вставка сделана
+        idempotent-ой на уровне БД (`ON CONFLICT DO NOTHING`), а при проигрыше гонки
+        пользователь перечитывается по выигравшей identity — вместо 500 клиент получает
+        сессию того же гостя.
+        """
+        users = UsersRepository(session)
+
+        if device_id:
+            existing = await users.find_identity(
+                provider=AuthProvider.guest, subject=device_id
+            )
+            if existing is not None:
+                owner = await users.get_by_id(existing.user_id)
+                if owner is not None and owner.is_guest:
+                    return owner
+                # Устройство принадлежит промоутнутому аккаунту (или строка пользователя
+                # исчезла) — device_id занят, новому гостю даём синтетический subject.
+                return await self._create_guest_user(users, subject=None)
+
+        return await self._create_guest_user(users, subject=device_id)
+
+    @staticmethod
+    async def _create_guest_user(
+        users: UsersRepository, *, subject: str | None
+    ) -> User:
+        """Создаёт гостя и его identity. `subject=None` → синтетический `guest:{user_id}`."""
+        user = await users.create(is_guest=True)
+        claimed = await users.add_identity_if_absent(
+            user_id=user.id,
+            provider=AuthProvider.guest,
+            subject=subject or f"guest:{user.id}",
+        )
+        if claimed or subject is None:
+            return user
+        # Гонку выиграл параллельный запрос: отдаём пользователя победителя, а созданная
+        # строка остаётся без identity — она не адресуема ни по одному входу.
+        winner_identity = await users.find_identity(
+            provider=AuthProvider.guest, subject=subject
+        )
+        if winner_identity is not None:
+            winner = await users.get_by_id(winner_identity.user_id)
+            if winner is not None and winner.is_guest:
+                return winner
+        return user
 
     async def sign_in_with_apple(
         self,

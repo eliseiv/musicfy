@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.enums import AuthProvider
@@ -58,3 +59,25 @@ class UsersRepository:
         self._session.add(identity)
         await self._session.flush()
         return identity
+
+    async def add_identity_if_absent(
+        self,
+        *,
+        user_id: UUID,
+        provider: AuthProvider,
+        subject: str,
+        meta: dict[str, Any] | None = None,
+    ) -> bool:
+        """Вставляет identity, возвращая False, если `(provider, subject)` уже занят.
+
+        В отличие от `add_identity`, не поднимает `IntegrityError` на гонке: конфликт по
+        `uq_auth_identities_provider_subject` — штатный исход при параллельных холодных
+        стартах одного устройства, а исключение здесь оборвало бы транзакцию целиком.
+        """
+        stmt = (
+            pg_insert(AuthIdentity)
+            .values(user_id=user_id, provider=provider, subject=subject, meta=meta)
+            .on_conflict_do_nothing(constraint="uq_auth_identities_provider_subject")
+            .returning(AuthIdentity.id)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None

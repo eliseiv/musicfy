@@ -33,7 +33,20 @@ def _to_response(result: SessionResult) -> SessionResponse:
     )
 
 
-@router.post("/guest", response_model=SessionResponse, summary="Создать guest-сессию")
+@router.post(
+    "/guest",
+    response_model=SessionResponse,
+    summary="Создать guest-сессию",
+    description=(
+        "Идемпотентен по `deviceId` (ADR-020): повторный вызов с тем же `deviceId` "
+        "возвращает новую сессию ТОМУ ЖЕ пользователю — с его балансом и историей. "
+        "Прежние сессии не отзываются. Без `deviceId` каждый вызов создаёт нового гостя. "
+        "`deviceId` должен быть стабильным и в НЕИЗМЕННОМ регистре: `(provider, subject)` "
+        "регистрозависим, поэтому `ABC` и `abc` заведут две разные учётки. "
+        "Если устройство принадлежит аккаунту, уже промоутнутому через Sign in with Apple, "
+        "выдаётся новый гость: `deviceId` не заменяет Apple-аутентификацию."
+    ),
+)
 async def guest_sign_in(
     body: GuestSignInRequest,
     auth: Annotated[AuthService, Depends(get_auth_service)],

@@ -9,7 +9,12 @@ from app.schemas.common import CamelModel
 
 class GuestSignInRequest(CamelModel):
     device_id: str | None = Field(
-        default=None, max_length=255, description="Стабильный ID устройства (опционально)."
+        default=None,
+        max_length=255,
+        description=(
+            "Стабильный ID устройства (опционально). Один и тот же `deviceId` всегда даёт "
+            "одного и того же гостя (ADR-020); регистр значим."
+        ),
     )
 
 
