@@ -57,7 +57,7 @@ jobs:
         env:
           # dir:project pairs. Добавлять новый инстанс СЮДА только после ручного
           # провижининга (/opt/<dir> + .env + healthz 200). См. docs/DEPLOYMENT.md §Мульти-инстанс.
-          INSTANCES: "musicfy:musicfy norqelia:norqelia"
+          INSTANCES: "musicfy:musicfy norqelia:norqelia doravixo:doravixo"
         run: |
           set -euo pipefail
           SSH=(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes)
