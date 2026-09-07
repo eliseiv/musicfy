@@ -495,6 +495,15 @@ Server-to-server вебхук `POST /v1/billing/adapty/webhook`: агрегат�
 начислится дважды ([TD-014](./100-known-tech-debt.md#td-014)). Митигация контрактная — один
 платёжный путь на сборку приложения.
 
+**Резолв `product_id` регистронезависим** ([ADR-021](./adr/ADR-021-product-id-case-insensitive-resolution.md)).
+Каталог общий для всех инстансов, но в App Store Connect приложения заведены в разном регистре
+(`100_tokens_9.99` на zavionix, `100_Tokens_9.99` на doravixo), поэтому
+`ProductsRepository.get_by_external_id` сравнивает через `lower()`, а уникальный индекс
+`uq_products_lower_external_product_id` не даёт завести два продукта, различающихся лишь
+регистром. Количество монет по-прежнему берётся ТОЛЬКО из `grants.coins`, а неизвестный продукт
+остаётся `unknown_product`. Витрина `GET /v1/billing/products` отдаёт id в регистре БД — если
+клиент берёт их для запроса к StoreKit, понадобится per-instance каталог (Q-021-1).
+
 Прежний каталог (`com.musicfy.coins.*`, `com.musicfy.sub.*`) — `active=false`, строки **не удаляются**:
 FK из `purchases`/`subscription_state` и резолв уже совершённых покупок/продлений должны продолжать
 работать. `ProductsRepository.get_by_external_id` резолвит продукт **без** фильтра `active` (это

@@ -25,3 +25,4 @@
 | [ADR-018](./ADR-018-multi-instance-traefik.md) | Мульти-инстанс musicfy за общим Traefik (клоны по доменам, norqelia.shop) | Accepted | 2026-08-13 |
 | [ADR-019](./ADR-019-adapty-subscription-webhook.md) | Вебхук подписок Adapty параллельно со StoreKit-контуром (двойная идемпотентность, резолв по device-id) | Accepted | 2026-08-28 |
 | [ADR-020](./ADR-020-guest-sign-in-device-idempotency.md) | Идемпотентность гостевого входа по `deviceId` (повторный вход — тот же гость, не 500) | Accepted | 2026-09-04 |
+| [ADR-021](./ADR-021-product-id-case-insensitive-resolution.md) | Регистронезависимый резолв `product_id` каталога (мульти-инстанс: `100_Tokens_9.99` / `100_tokens_9.99`) | Accepted | 2026-09-07 |

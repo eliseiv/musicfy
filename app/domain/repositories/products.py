@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,24 @@ class ProductsRepository:
         self._session = session
 
     async def get_by_external_id(self, external_id: str) -> Product | None:
-        stmt = select(Product).where(Product.external_product_id == external_id)
+        """Резолвит продукт по внешнему id БЕЗ учёта регистра (ADR-021).
+
+        App Store Connect трактует `product_id` как регистрозависимую строку, но у разных
+        приложений один и тот же по смыслу продукт заведён в разном регистре
+        (`100_tokens_9.99` на zavionix, `100_Tokens_9.99` на doravixo), а каталог `products`
+        засевается общей миграцией для всех инстансов. Точное сравнение давало бы
+        `unknown_product` и потерю монет на том инстансе, чей регистр разошёлся с сидом —
+        ровно дефект, ради которого писался ADR-015.
+
+        Однозначность гарантирует уникальный индекс `uq_products_lower_external_product_id`:
+        двух продуктов, различающихся только регистром, в каталоге существовать не может.
+
+        Фильтр `active` намеренно не применяется: продления старых подписок и restore уже
+        совершённых покупок обязаны резолвиться даже по деактивированному продукту.
+        """
+        stmt = select(Product).where(
+            func.lower(Product.external_product_id) == external_id.lower()
+        )
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_active(self) -> list[Product]:
