@@ -319,6 +319,7 @@ compose-project `<project>`, свой volume `pgdata`, свой `.env`. Обще
 | `API_KEY` / `ADMIN_API_KEY` | сервисный / админ-ключ (уникальные) | — |
 | `FAL_WEBHOOK_SECRET` | HMAC webhook fal (уникальный) | — |
 | `ADAPTY_WEBHOOK_SECRET` | bearer вебхука Adapty (уникальный, см. ниже) | — |
+| `APPLE_BUNDLE_ID` / `APPLE_ALLOWED_AUDIENCES` | bundle id приложения инстанса; пусто → `POST /v1/auth/apple` даёт 401 `audience_not_configured` | — |
 
 `FAL_API_KEY` можно разделять между инстансами (как Anthropic-ключ у claude-ios).
 Apple/StoreKit/APNs — per-instance (свой bundle id / ключи).
@@ -403,9 +404,21 @@ curl -s -X POST https://<SERVICE_DOMAIN>/v1/billing/adapty/webhook   -H "Authori
    API_KEY=<openssl rand -hex 32>
    ADMIN_API_KEY=<openssl rand -hex 32>
    FAL_WEBHOOK_SECRET=<openssl rand -hex 32>
-   # FAL_API_KEY — можно взять с musicfy; Apple/APNs — свои или пустые до релиза
+   ADAPTY_WEBHOOK_SECRET=<openssl rand -hex 32>   # свой на инстанс, см. §Adapty
+   APPLE_BUNDLE_ID=<bundle id приложения этого инстанса>
+   APPLE_ALLOWED_AUDIENCES=<тот же bundle id, через запятую если их несколько>
+   # FAL_API_KEY — можно взять с musicfy; APNs — свои или пустые до релиза
    ```
    `chmod 600 /opt/<dir>/.env`
+
+   > ⚠️ **`APPLE_ALLOWED_AUDIENCES` нельзя оставлять пустым, если приложение использует
+   > Sign in with Apple.** Список audience собирается как `APPLE_ALLOWED_AUDIENCES` либо, если
+   > он пуст, `APPLE_BUNDLE_ID` (`Settings.apple_allowed_audiences`). Когда пусты оба,
+   > `POST /v1/auth/apple` отвечает **401 `APPLE_IDENTITY_INVALID`** с
+   > `reason: audience_not_configured` — вход через Apple не работает вовсе, хотя остальные
+   > контуры выглядят здоровыми. Bundle id у каждого инстанса СВОЙ (у `doravixo` —
+   > `com.tek.5107a1v2`, у `musicfy` — `com.rya.5066m0s15f7`); чужой сюда вписывать нельзя,
+   > иначе инстанс начнёт принимать identity-токены чужого приложения.
 4. **Проверка compose config:**
    ```bash
    cd /opt/<dir>
