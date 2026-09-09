@@ -458,7 +458,7 @@ Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notific
 
 `external_product_id` совпадает **вербатим** с `product_id` в App Store Connect / `.storekit`; StoreKit
 матчит покупку по этой строке байт-в-байт; Adapty сравнивает `vendor_product_id` так же. Актуальный
-активный каталог (`active=true`, засеян миграцией `0017`, гранты подписок — `0020`):
+активный каталог (`active=true`, засеян миграцией `0017`, гранты подписок — `0020`, спецоффер — `0022`):
 
 | external_product_id | kind | title | grants | period_days |
 |---|---|---|---|---|
@@ -469,6 +469,7 @@ Server API), webhook `POST /v1/webhooks/billing/apple` (App Store Server Notific
 | `2000_tokens_99.99` | coin_pack | 2000 Tokens | `{"coins":2000}` | — |
 | `week_6.99_not_trial` | subscription | Weekly | `{"coins":700}` | 7 |
 | `yearly_49.99_not_trial` | subscription | Yearly | `{"coins":5000}` | 365 |
+| `offer_week_3.99_nottrial` | subscription | Weekly Offer | `{"coins":700}` | 7 |
 
 ### Контур 2 — Adapty ([ADR-019](./adr/ADR-019-adapty-subscription-webhook.md))
 
@@ -503,6 +504,12 @@ Server-to-server вебхук `POST /v1/billing/adapty/webhook`: агрегат�
 регистром. Количество монет по-прежнему берётся ТОЛЬКО из `grants.coins`, а неизвестный продукт
 остаётся `unknown_product`. Витрина `GET /v1/billing/products` отдаёт id в регистре БД — если
 клиент берёт их для запроса к StoreKit, понадобится per-instance каталог (Q-021-1).
+
+`offer_week_3.99_nottrial` — недельная подписка по сниженной цене ($3.99 против $6.99) с тем же
+грантом (700 монет / 7 дней): цена живёт в App Store Connect, у нас хранится только размер
+начисления, поэтому в каталоге это два отдельных продукта с одинаковым `grants`. Написание
+`nottrial` слитно — вербатим из App Store Connect, в отличие от `week_6.99_not_trial`; резолв
+регистронезависим, но не «пунктуация-независим».
 
 Прежний каталог (`com.musicfy.coins.*`, `com.musicfy.sub.*`) — `active=false`, строки **не удаляются**:
 FK из `purchases`/`subscription_state` и резолв уже совершённых покупок/продлений должны продолжать
