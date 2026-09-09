@@ -46,6 +46,16 @@ NEW_CATALOG: dict[str, tuple[str, int, int | None]] = {
 # Ревизия ПЕРЕД 0017 — точка отката для round-trip теста каталога.
 _CATALOG_BASE = "0016_purchase_dedup_key"
 
+# Продукты, добавленные в каталог ПОСЛЕ 0017 отдельными миграциями. NEW_CATALOG остаётся
+# слепком ровно вербатим-каталога ADR-015, а витрина проверяется против объединения —
+# иначе каждый новый продукт ломал бы тест исходной миграции, к которой не относится.
+POST_0017_ACTIVE: dict[str, tuple[str, int, int | None]] = {
+    # 0022 — спецоффер: недельная подписка по сниженной цене, грант как у week_6.99_not_trial.
+    "offer_week_3.99_nottrial": ("subscription", 700, 7),
+}
+
+ACTIVE_CATALOG = {**NEW_CATALOG, **POST_0017_ACTIVE}
+
 # Старый монетный каталог (0011), деактивируемый 0017. Grants сохраняются как были.
 LEGACY_IDS = [
     "com.musicfy.coins.small",
@@ -62,7 +72,7 @@ async def _balance(client, headers) -> dict:
 
 
 # ==========================================================================
-# Кейс 2. Клиентский каталог: ровно 7 новых вербатим-продуктов
+# Кейс 2. Клиентский каталог: ровно активные вербатим-продукты
 # ==========================================================================
 
 
@@ -72,12 +82,12 @@ async def test_products_endpoint_returns_exactly_new_verbatim_catalog(client):
     assert resp.status_code == 200
     products = {p["productId"]: p for p in resp.json()}
 
-    # Ровно 7 новых id — ни больше, ни меньше.
-    assert set(products) == set(NEW_CATALOG)
+    # Ровно активный каталог — ни больше, ни меньше.
+    assert set(products) == set(ACTIVE_CATALOG)
     # Ни одного старого com.musicfy.* в клиентском каталоге (деактивированы).
     assert not any(pid.startswith("com.musicfy.") for pid in products)
 
-    for pid, (kind, coins, period) in NEW_CATALOG.items():
+    for pid, (kind, coins, period) in ACTIVE_CATALOG.items():
         assert products[pid]["kind"] == kind, pid
         assert products[pid]["grants"] == {"coins": coins}, pid
         assert products[pid]["periodDays"] == period, pid
@@ -252,16 +262,16 @@ async def test_migration_0017_roundtrip_idempotent_and_reversible():
     """
     state_head = await _catalog_state()
     try:
-        # Исходный инвариант head (0017): 7 новых active, 6 старых inactive.
+        # Исходный инвариант head: активный каталог (0017 + добавленные позже), 6 старых inactive.
         new_active = {
             k for k, v in state_head.items() if v[3] and not k.startswith("com.musicfy.")
         }
         old_inactive = {
             k for k, v in state_head.items() if not v[3] and k.startswith("com.musicfy.")
         }
-        assert new_active == set(NEW_CATALOG), state_head
+        assert new_active == set(ACTIVE_CATALOG), state_head
         assert old_inactive == set(LEGACY_IDS), state_head
-        assert len(state_head) == 13
+        assert len(state_head) == len(ACTIVE_CATALOG) + len(LEGACY_IDS)
 
         # downgrade → 0016: реактивация 6 старых, деактивация 7 новых, БЕЗ удаления строк.
         _alembic("downgrade", _CATALOG_BASE)
@@ -277,14 +287,14 @@ async def test_migration_0017_roundtrip_idempotent_and_reversible():
         state_up = await _catalog_state()
         # Round-trip идемпотентен и обратим: состояние идентично исходному, без дублей.
         assert state_up == state_head
-        assert len(state_up) == 13
+        assert len(state_up) == len(ACTIVE_CATALOG) + len(LEGACY_IDS)
 
         # Второй round-trip: повторный прогон upsert по-прежнему даёт идентичное состояние.
         _alembic("downgrade", _CATALOG_BASE)
         _alembic("upgrade", "head")
         state_up2 = await _catalog_state()
         assert state_up2 == state_head
-        assert len(state_up2) == 13
+        assert len(state_up2) == len(ACTIVE_CATALOG) + len(LEGACY_IDS)
     finally:
         # Гарантируем возврат БД на head даже при падении assert выше.
         _alembic("upgrade", "head")
